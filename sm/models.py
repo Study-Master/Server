@@ -3,7 +3,7 @@ import datetime
 
 class Account(models.Model):
     username = models.CharField(max_length=15)
-    password = models.CharField(max_length=15)
+    password = models.CharField(max_length=32)
 
 class User(models.Model):
     account = models.ForeignKey(Account)

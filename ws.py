@@ -6,21 +6,9 @@ from tornado.options import define, options
 
 import json
 
-
+from sm.models import *
 
 clients = []
-
-
-class IndexHandler(tornado.websocket.WebSocketHandler):
-    def open(self):
-        print('---inside index---')
-        self.redirect('/ws', permanent=True)
-
-    def on_message(self, message):
-        self.write_message(u"You said: " + message)
-
-    def on_close(self):
-        print('---outside index---')
 
 class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
     def open(self, *args):
@@ -45,8 +33,7 @@ class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
         self.close()
         
 def login(self, msg):
-    if(msg['account'] == 'studymaster' and
-       msg['password'] == 'e807f1fcf82d132f9bb018ca6738a19f'):
+    if(Account.objects.get(username=msg['account'], password=msg['password'])):
         print('---Login Success---')
         reContent = {'event': 'login',
                      'endpoint': 'Server',
@@ -55,7 +42,7 @@ def login(self, msg):
     else:
         print('---Login Failed---')
         reContent = {'event': 'login',
-                     'endpoint': 'Server',
+                     'endpoint': 'Servebr',
                      'content':{
                          'status': 'failed',
                          'code': '0',
@@ -65,8 +52,7 @@ def login(self, msg):
             
 
 app = tornado.web.Application([
-    (r'/', IndexHandler),
-    (r'/ws', WebSocketChatHandler),
+    (r'/', WebSocketChatHandler),
 ])
 
 if __name__ == '__main__':
