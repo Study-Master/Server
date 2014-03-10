@@ -42,7 +42,7 @@ class Exam(models.Model):
 class TextChat(models.Model):
     exam = models.ForeignKey(Exam)
     content = models.TextField()
-    time = models.DateTimeField(default=datetime.datetime.now().time())
+    time = models.DateTimeField(default=datetime.datetime.now())
     
 class FileStorage(models.Model):
     exam = models.ForeignKey(Exam)
