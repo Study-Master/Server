@@ -67,19 +67,17 @@ def profile(self, msg):
                    "start_time": None} for e in Enroll.objects.filter(student=s)]
 
     for c in courseList:
-        exam = Exam.objects.get(enroll__course=c)
+        exam = Exam.objects.get(enroll__course__pk=c.pk)
         if(exam):
             c["start_time"] = exam.timeslot.start_time
-            age = datetime.now() - exam.timeslot.start_time
+            age = datetime.now() - datetime.strptime(c["start_time"], fmt)
             if(timedelta(minutes=15) < age < timedelta(days=3)):
                 c["status"] = "booked"
             elif(age < 0):
                 c["status"] = "finished"
-        else:
-            ts = ExamTimeslot.objects.filter(course = c)
-            #
-            # -> check whether booking is closed
-            #
+        elif(now > max(ExamTimeslot.objects.filter(course=c))):
+            c["status"] = "closed"
+
     
     reContent = {"event": "profile",
                  "endpoint": "Server",
@@ -92,8 +90,6 @@ def profile(self, msg):
              }
     
     self.write_message(json.dumps(reContent))
-    
-
 
     
 ##################################################
