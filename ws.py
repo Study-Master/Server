@@ -40,8 +40,8 @@ class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
 
 fmt = '%Y/%m/%d %H:%M:%S'
 
-def login(self, msg):
-    if(Account.objects.get(username=msg['account'], password=msg['password'])):
+def login(self, content):
+    if(Account.objects.get(username=content['account'], password=content['password'])):
         print('---Login Success---')
         reContent = {'event': 'login',
                      'endpoint': 'Server',
@@ -58,9 +58,8 @@ def login(self, msg):
         
     self.write_message(json.dumps(reContent))
 
-def profile(self, msg):
-    now = datetime.now()
-    s = Student.objects.get(account=Account.objects.get(username=msg['account']))
+def profile(self, content):
+    s = Student.objects.get(account=Account.objects.get(username=content['account']))
 
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
@@ -72,21 +71,23 @@ def profile(self, msg):
             exam = Exam.objects.get(enroll__course__code=c["code"])
         except ObjectDoesNotExist:
             exam = None
-        if(exam):
+        if(exam): # if booked
             c["start_time"] = exam.timeslot.start_time
-            age = datetime.now() - datetime.strptime(c["start_time"], fmt)
-            if(timedelta(minutes=15) < age < timedelta(days=3)):
+            if(datetime.strptime(c["start_time"], fmt)-datetime.now() > timedelta(minutes=15)):
                 c["status"] = "booked"
-            elif(age < 0):
+            elif(age < timedelta(0)):
                 c["status"] = "finished"
-        elif(now > max(ExamTimeslot.objects.filter(course=c))):
-            c["status"] = "closed"
+        else:
+            tsList = [datetime.strptime(item.start_time, fmt)
+                      for item in ExamTimeslot.objects.filter(course__code=c["code"])]
+            if(datetime.now() > max(tsList)):
+                c["status"] = "closed"
 
-    
+            
     reContent = {"event": "profile",
                  "endpoint": "Server",
                  "content": {
-                     "account": msg['account'],
+                     "account": content['account'],
                      "profile":  {
                          "courses": courseList
                      }
@@ -95,6 +96,35 @@ def profile(self, msg):
     
     self.write_message(json.dumps(reContent))
 
+def booking(self, content):
+    tsList = [{"start_time": item.start_time}
+              for item in ExamTimeslot.objects.filter(course__code=content["code"])]
+
+    reContent = {"event": "booking",
+                 "endpoint": "Server",
+                 "content": {
+                     "account": content["account"],
+                     "code": content["code"],
+                     "examTime": tsList
+                 }
+             }
+    
+    self.write_message(json.dumps(reContent))
+
+def exam_question(self, content):
+    qList = [{}
+             for item in ExamQuestion.objects.filter(course__code=content["code"])]
+
+    reContent = {"event": "exam_question",
+                 "endpoint": "Server",
+                 "content": {
+                     "course_code": content["code"],
+                     "question_set": qList
+                 }
+             }
+
+    
+    self.write_message(json.dumps(reContent))
     
 ##################################################
 #  CONFIG
