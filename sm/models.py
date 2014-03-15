@@ -23,7 +23,7 @@ class Course(models.Model):
 
 class ExamTimeslot(models.Model):
     course = models.ForeignKey(Course)
-    start_time = models.DateTimeField()
+    start_time = models.CharField(max_length=20)
 
 class ExamQuestion(models.Model):
     course = models.ForeignKey(Course)
@@ -42,7 +42,7 @@ class Exam(models.Model):
 class TextChat(models.Model):
     exam = models.ForeignKey(Exam)
     content = models.TextField()
-    time = models.DateTimeField(default=datetime.datetime.now())
+    time = models.CharField(max_length=20)
     
 class FileStorage(models.Model):
     exam = models.ForeignKey(Exam)
