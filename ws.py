@@ -67,7 +67,7 @@ def profile(self, msg):
                    "start_time": None} for e in Enroll.objects.filter(student=s)]
 
     for c in courseList:
-        exam = Exam.objects.get(enroll__course__code=c["code"])
+        exam = Exam.objects.get(enroll__course__code=c["code"]) or None
         if(exam):
             c["start_time"] = exam.timeslot.start_time
             age = datetime.now() - datetime.strptime(c["start_time"], fmt)
