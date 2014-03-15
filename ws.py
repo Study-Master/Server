@@ -9,6 +9,7 @@ import json
 from sm.models import *
 
 from datetime import datetime, timedelta
+from hashlib import md5
 
 clients = []
 
