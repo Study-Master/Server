@@ -119,6 +119,18 @@ def booking(self, content):
     
     self.write_message(json.dumps(reContent))
 
+
+def booked(self, content):
+    exam = Exam(enroll=Enroll.objects.get(
+        student=Student.objects.get(
+        account=Account.objects.get(username=content["account"]))),
+        timeslot=ExamTimeslot.objects.get(start_time=content["start_time"]),
+        invigilator=Invigilator.objects.all()[0])
+    print("---exam booked---")
+    exam.save()
+    
+    
+
 def exam_question(self, content):
     qList = [json.loads(item.content)
              for item in ExamQuestion.objects.filter(course__code=content["code"])]
@@ -133,18 +145,16 @@ def exam_question(self, content):
 
     
     self.write_message(json.dumps(reContent)) 
+
+
     
 ##################################################
 #  CONFIG
 ##################################################
 
+app = tornado.web.Application([(r'/', WebSocketChatHandler),])
 
-app = tornado.web.Application([
-    (r'/', WebSocketChatHandler),
-])
-
-if __name__ == '__main__':
-    
+if __name__ == '__main__':    
     http_server = tornado.httpserver.HTTPServer(app)
     http_server.listen(8087)
     tornado.ioloop.IOLoop.instance().start()
