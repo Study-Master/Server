@@ -38,6 +38,11 @@ class Exam(models.Model):
     enroll = models.ForeignKey(Enroll)
     timeslot = models.ForeignKey(ExamTimeslot)
     invigilator = models.ForeignKey(Invigilator)
+    
+class Answer(models.Model):
+    exam = models.ForeignKey(Exam)
+    question = models.ForeignKey(ExamQuestion)
+    answer = models.TextField()
 
 class TextChat(models.Model):
     exam = models.ForeignKey(Exam)

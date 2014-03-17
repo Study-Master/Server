@@ -3,11 +3,8 @@ import tornado.web
 import tornado.websocket
 import tornado.httpserver
 from tornado.options import define, options
-
 import json
-
 from sm.models import *
-
 from datetime import datetime, timedelta
 from hashlib import md5
 from django.core.exceptions import ObjectDoesNotExist
@@ -40,20 +37,28 @@ class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
 
 fmt = '%Y/%m/%d %H:%M:%S'
 
+def pong(self, content):
+    reContent = {"event": "pong",
+                 "endpoint": "Server",
+                 "content": {
+                     "time": datetime.strftime(datetime.now(), fmt)}}
+
+    self.write_message(json.dumps(reContent))
+
 def login(self, content):
     if(Account.objects.get(username=content['account'], password=content['password'])):
         print('---Login Success---')
         reContent = {'event': 'login',
                      'endpoint': 'Server',
-                     'content':{
-                             'status': 'success'}}
+                     'content': {
+                         'status': 'success'}}
     else:
         print('---Login Failed---')
         reContent = {'event': 'login',
                      'endpoint': 'Servebr',
-                     'content':{
+                     'content': {
                          'status': 'failed',
-                             'code': '0',
+                         'code': '0',
                          'reason': 'Account or Password is wrong.'}}
         
     self.write_message(json.dumps(reContent))
@@ -64,7 +69,7 @@ def profile(self, content):
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
                    "status": "unbooked",
-                   "start_time": None} for e in Enroll.objects.filter(student=s)]
+                   "start_time": ""} for e in Enroll.objects.filter(student=s)]
 
     for c in courseList:
         try:
@@ -73,15 +78,18 @@ def profile(self, content):
             exam = None
         if(exam): # if booked
             c["start_time"] = exam.timeslot.start_time
-            if(datetime.strptime(c["start_time"], fmt)-datetime.now() > timedelta(minutes=15)):
+            if(datetime.strptime(c["start_time"], fmt) - datetime.now()
+               > timedelta(minutes=15)):
                 c["status"] = "booked"
             elif(age < timedelta(0)):
                 c["status"] = "finished"
         else:
             tsList = [datetime.strptime(item.start_time, fmt)
                       for item in ExamTimeslot.objects.filter(course__code=c["code"])]
-            if(datetime.now() > max(tsList)):
+            if(tsList == [] or datetime.now() > max(tsList)):
                 c["status"] = "closed"
+            else:
+                c["start_time"] = datetime.strftime(max(tsList), fmt)
 
             
     reContent = {"event": "profile",
@@ -112,7 +120,7 @@ def booking(self, content):
     self.write_message(json.dumps(reContent))
 
 def exam_question(self, content):
-    qList = [{}
+    qList = [json.loads(item.content)
              for item in ExamQuestion.objects.filter(course__code=content["code"])]
 
     reContent = {"event": "exam_question",
@@ -124,7 +132,7 @@ def exam_question(self, content):
              }
 
     
-    self.write_message(json.dumps(reContent))
+    self.write_message(json.dumps(reContent)) 
     
 ##################################################
 #  CONFIG
