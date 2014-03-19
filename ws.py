@@ -135,16 +135,40 @@ def exam_question(self, content):
     qList = [json.loads(item.content)
              for item in ExamQuestion.objects.filter(course__code=content["code"])]
 
+    exam = Exam.objects.get(
+        enroll=Enroll.objects.get(student=Student.objects.get(account=content["account"])),
+        timeslot=ExamTimeslot.objects.get(start_time=content["start_time"]))
+
     reContent = {"event": "exam_question",
                  "endpoint": "Server",
                  "content": {
                      "course_code": content["code"],
+                     "exam_pk": exam.pk,
                      "question_set": qList
                  }
              }
 
     
-    self.write_message(json.dumps(reContent)) 
+    self.write_message(json.dumps(reContent))
+
+def exam_question_answer(self, content):
+    for item in content["question_set"]:
+        answer = Answer(exam=Exam.objects.get(pk=content["exam_pk"]),
+                        question=ExamQuestion.objects.get(pk=item["pk"]),
+                        answer=item["question_content"]["answer"])
+        answer.save()
+
+
+    reContent = {"event": "submission_message",
+                 "endpoint": "Server",
+                 "content": {
+                     "code": "CZ0001",
+                     "submission_status": "successful"
+                 }
+             }
+    
+    self.write_message(json.dumps(reContent))
+    
 
 
     
