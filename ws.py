@@ -12,19 +12,25 @@ from django.core.exceptions import ObjectDoesNotExist
 clients = []
 
 class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
+    
     def open(self, *args):
+        
         print('---New Connection---')
         print(self.request.connection.stream.socket.getsockname())
         clients.append(self)
         print(str(self))
         print(clients)
+        
 
-    def on_message(self, message):     
+    def on_message(self, message):
+        
         print(message)
         msg = json.loads(message)
         globals()[msg['event']](self, msg['content'])
-      
+
+        
     def on_close(self):
+        
         print('---Connection Closed---')
         clients.remove(self)
         self.close()
@@ -38,6 +44,7 @@ class WebSocketChatHandler(tornado.websocket.WebSocketHandler):
 fmt = '%Y/%m/%d %H:%M:%S'
 
 def pong(self, content):
+    
     reContent = {"event": "pong",
                  "endpoint": "Server",
                  "content": {
@@ -45,7 +52,9 @@ def pong(self, content):
 
     self.write_message(json.dumps(reContent))
 
+    
 def login(self, content):
+    
     if(Account.objects.get(username=content['account'], password=content['password'])):
         print('---Login Success---')
         reContent = {'event': 'login',
@@ -62,8 +71,10 @@ def login(self, content):
                          'reason': 'Account or Password is wrong.'}}
         
     self.write_message(json.dumps(reContent))
+    
 
 def profile(self, content):
+    
     s = Student.objects.get(account=Account.objects.get(username=content['account']))
 
     courseList = [{"code": e.course.code,
@@ -104,7 +115,9 @@ def profile(self, content):
     
     self.write_message(json.dumps(reContent))
 
+    
 def booking(self, content):
+    
     tsList = [{"start_time": item.start_time}
               for item in ExamTimeslot.objects.filter(course__code=content["code"])]
 
@@ -121,23 +134,26 @@ def booking(self, content):
 
 
 def booked(self, content):
+    
     exam = Exam(enroll=Enroll.objects.get(
         student=Student.objects.get(
         account=Account.objects.get(username=content["account"]))),
         timeslot=ExamTimeslot.objects.get(start_time=content["start_time"]),
         invigilator=Invigilator.objects.all()[0])
+    
     print("---exam booked---")
     exam.save()
     
     
-
 def exam_question(self, content):
+    
     qList = [json.loads(item.content)
              for item in ExamQuestion.objects.filter(course__code=content["code"])]
 
-    exam = Exam.objects.get(
-        enroll=Enroll.objects.get(student=Student.objects.get(account=content["account"])),
-        timeslot=ExamTimeslot.objects.get(start_time=content["start_time"]))
+    exam = Exam.objects.get(enroll=Enroll.objects.get(
+        student=Student.objects.get(account=Account.objects.get(username=content["account"])),
+        course=Course.objects.get(code=content["code"])))
+
 
     reContent = {"event": "exam_question",
                  "endpoint": "Server",
@@ -150,8 +166,10 @@ def exam_question(self, content):
 
     
     self.write_message(json.dumps(reContent))
+    
 
 def exam_question_answer(self, content):
+    
     for item in content["question_set"]:
         answer = Answer(exam=Exam.objects.get(pk=content["exam_pk"]),
                         question=ExamQuestion.objects.get(pk=item["pk"]),
@@ -169,6 +187,28 @@ def exam_question_answer(self, content):
     
     self.write_message(json.dumps(reContent))
     
+    
+def cancel(self, content):
+    
+    exam = Exam.objects.get(enroll=Enroll.objects.get(
+        student=Student.objects.get(account=Account.objects.get(username=content["account"])),
+        course=Course.objects.get(code=content["code"])))
+
+    start_time = exam.timeslot.start_time
+
+    exam.delete()
+
+    reContent = {"event": "cancel",
+                 "endpoint": "Server",
+                 "content": {
+                     "code": content["code"],
+                     "account" content["account"],
+                     "status": "successful",
+                     "start_time": start_time
+                 }
+             }
+    
+    self.write_message(json.dumps(reContent))
 
 
     
