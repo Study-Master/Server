@@ -105,11 +105,9 @@ def profile(self, content):
         except ObjectDoesNotExist:
             exam = None
         if(exam): # if booked
+            c["status"] = "booked"
             c["start_time"] = exam.timeslot.start_time
-            age = datetime.strptime(c["start_time"], fmt) - datetime.now()
-            if(age > timedelta(minutes=15)):
-                c["status"] = "booked"
-            elif(age < timedelta(0)):
+            if(datetime.strptime(c["start_time"], fmt) - datetime.now() < timedelta(0)):
                 c["status"] = "finished"
         else:
             tsList = [datetime.strptime(item.start_time, fmt)
@@ -147,11 +145,18 @@ def booked(self, content):
         student=Student.objects.get(
             account=Account.objects.get(username=content["account"])),
         course=Course.objects.get(code=content["code"])),
-        timeslot=ExamTimeslot.objects.get(start_time=content["examTime"]),
+        timeslot=ExamTimeslot.objects.get(start_time=content["start_time"],
+                                          course__code=content["code"]),
         invigilator=Invigilator.objects.all()[0])
-    
     print('[INFO] EXAM BOOKED')
     exam.save()
+    reContent = {"event": "booked",
+                 "endpoint": "Server",
+                 "content": {
+                     "status": "success"
+                 }
+             }    
+    self.write_message(json.dumps(reContent))
     
 def exam_question(self, content):
     qList = [json.loads(item.content)
