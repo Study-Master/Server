@@ -1,26 +1,26 @@
-import tornado.ioloop
-import tornado.web
-import tornado.websocket
-import tornado.httpserver
-from tornado.options import define, options
-import json
+from tornado.ioloop import IOLoop
+from tornado.httpserver import HTTPServer
+from tornado import web
+from tornado import websocket
+from tornado import gen
 from sm.models import *
 from datetime import datetime, timedelta
-from hashlib import md5
 from django.core.exceptions import ObjectDoesNotExist
-
+import time
+import json
 
 ##################################################
-#  WEBSOCKET
+#  WEBSOCKET APPS
 ##################################################
 
 clients = []
 
-class WSHandler(tornado.websocket.WebSocketHandler):
+class JSONHandler(websocket.WebSocketHandler):
     def open(self, *args):
         clients.append(self)
         self.account = ""
         self.endpoint = ""
+        self.target = ""
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
         print('[INFO]')
@@ -32,18 +32,22 @@ class WSHandler(tornado.websocket.WebSocketHandler):
         print('[EVNT] MESSAGE RECEIVED')
         print('[INFO]')
         print('[JSON] ' + message)
-        msg = json.loads(message)
-        if(self.endpoint == ""):
-            self.endpoint = msg['endpoint']
-        print('[INFO]')
-        print('[INFO] SENDER INFO')
-        print('[INFO] IP: ' + self.request.remote_ip)
-        print('[INFO] Account: ' + self.account)
-        print('[INFO] Endpoint: ' + self.endpoint)
-        print('[INFO] -----------------------------------------------------------------------')
-        print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
-        print('[INFO]')
-        globals()[msg['event']](self, msg['content'])
+        try:
+            msg = json.loads(message)            
+            if(self.endpoint == ""): self.endpoint = msg['endpoint']
+            print('[INFO]')
+            print('[INFO] SENDER INFO')
+            print('[INFO] IP: ' + self.request.remote_ip)
+            print('[INFO] Account: ' + self.account)
+            print('[INFO] Endpoint: ' + self.endpoint)
+            print('[INFO] -----------------------------------------------------------------------')
+            print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
+            print('[INFO]')
+            globals()[msg['event']](self, msg['content'])
+        except TypeError: # for Byte[]
+            target = next((client for clinet in clients
+                           if client.account == self.target), None)
+            # target.write_message(message)
         
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
@@ -59,7 +63,7 @@ class WSHandler(tornado.websocket.WebSocketHandler):
 
 
 ##################################################
-#  FUNCTIONS
+#  VIEWS
 ##################################################
 
 fmt = '%Y/%m/%d %H:%M:%S'
@@ -71,6 +75,7 @@ def pong(self, content):
                      "time": datetime.strftime(datetime.now(), fmt)}}
     self.write_message(json.dumps(reContent))
 
+@gen.coroutine
 def login(self, content):
     try:
         account = Account.objects.get(username=content['account'],
@@ -90,8 +95,35 @@ def login(self, content):
                          'code': '0',
                          'reason': 'Account or Password is wrong.'}}
     self.write_message(json.dumps(reContent))
-    
+    yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
+    print('[ASYC] END OF LOGIN')
 
+@gen.coroutine
+def checkExam(self):
+    while(True):
+        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 30)
+        print('[TEST] ENTER checkExam')
+        examList = Exam.objects.filter(enroll__student__account__username=self.account)
+        for exam in examList:
+            age = datetime.strptime(exam.timeslot.start_time) - datetime.now()
+            if(age > timedelta(days=3)):
+                event = "cancel_disabled"
+            elif(age > timedelta(minutes=15)):
+                event = "exam_enabled"
+            elif(age < timedelta(minutes=-15)):
+                event = "exam_disabled"
+            else:
+                event = None
+            if(event):
+                reContent = {'event': event,
+                             'endpoint': 'Server',
+                             'content': {
+                                 'code': exam.enroll.course.code
+                             }
+                         }
+                self.write_message(json.dumps(reContent))
+
+    
 def profile(self, content):
     s = Student.objects.get(account=Account.objects.get(username=content['account']))
     courseList = [{"code": e.course.code,
@@ -133,7 +165,6 @@ def booking(self, content):
     reContent = {"event": "booking",
                  "endpoint": "Server",
                  "content": {
-                     "account": content["account"],
                      "code": content["code"],
                      "examTime": tsList
                  }
@@ -172,6 +203,7 @@ def exam_question(self, content):
                      "question_set": qList
                  }
              }
+    self.target = exam.invigilator.account.username
     self.write_message(json.dumps(reContent))
     
 def exam_question_answer(self, content):
@@ -217,12 +249,13 @@ def exam_chat(self, content):
 
 
 ##################################################
-#  CONFIG
+#  MAIN
 ##################################################
 
-app = tornado.web.Application([(r'/', WSHandler),])
+app = web.Application([(r'/', JSONHandler),])
 
 if __name__ == '__main__':    
-    http_server = tornado.httpserver.HTTPServer(app)
-    http_server.listen(8087)
-    tornado.ioloop.IOLoop.instance().start()
+    HTTPServer(app).listen(8087)
+    IOLoop.instance().add_callback(login)
+    IOLoop.instance().add_callback(checkExam)
+    IOLoop.instance().start()
