@@ -94,7 +94,9 @@ def showClientInfo(self):
 def sendMsg(self, reContent):
     print('[INFO] -----------------------------------------------------------------------')
     print('[EVNT] MESSAGE SEND')
-    self.write_message(json.dumps(reContent))
+    msg = json.dumps(reContent)
+    print('[JSON] ' + msg)
+    self.write_message(msg)
     print('[INFO] -----------------------------------------------------------------------')
 
 def pong(self, content):
@@ -119,9 +121,10 @@ def login(self, content):
                      'content': {
                          'status': 'success'}}
         self.account = account.username
-    except (ObjectDoesNotExist, StopIteration) as e:
+    except (ObjectDoesNotExist, NameError) as e:
+        reason = ""
         print('[INFO] LOGIN FAILED')
-        if(type(e) == StopIteration):
+        if(type(e) == NameError):
             reason = "Your account is already logged in!"
         if(type(e) == ObjectDoesNotExist):
             reason = "Account or Password is wrong!"
@@ -135,17 +138,26 @@ def login(self, content):
 
 @gen.coroutine
 def checkExam(self):
+    cancelList = []
+    confirmList = []
+    blockList = []
     while(True):
-        print('[ASYC] ENTER checkExam')
         examList = Exam.objects.filter(enroll__student__account__username=self.account)
+        print('[ASYC] ENTER checkExam')
         for exam in examList:
-            age = datetime.strptime(exam.timeslot.start_time) - datetime.now()
-            if(age > timedelta(days=3)):
-                event = "cancel_disabled"
-            elif(age > timedelta(minutes=15)):
-                event = "exam_enabled"
-            elif(age < timedelta(minutes=-15)):
+            age = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
+            if(age < timedelta(minutes=-15) and exam not in blockList):
                 event = "exam_disabled"
+                blockList.append(exam)
+                confirmList.append(exam)
+                cancelList.append(Exam)
+            elif(age < timedelta(minutes=15) and exam not in confirmList):
+                event = "exam_enabled"
+                confirmList.append(exam)
+                cancelList.append(Exam)
+            elif(age < timedelta(days=3) and exam not in cancelList):
+                event = "cancel_disabled"
+                cancelList.append(exam)
             else:
                 event = None
             if(event):
@@ -158,7 +170,7 @@ def checkExam(self):
                          }
                 sendMsg(self, reContent)
         print('[ASYC] LEAVE checkExam')
-        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 60)
+        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
     
 def profile(self, content):
     checkExam(self)
