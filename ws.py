@@ -14,6 +14,7 @@ import json
 ##################################################
 
 clients = []
+fclients = []
 
 class JSONHandler(websocket.WebSocketHandler):
     def open(self, *args):
@@ -23,8 +24,7 @@ class JSONHandler(websocket.WebSocketHandler):
         self.target = ""
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
-        print('[INFO]')
-        print('[INFO] Client IP: ' + self.request.remote_ip)
+        showClientInfo(self)
         print('[INFO] -----------------------------------------------------------------------')
     
     def on_message(self, message):
@@ -32,35 +32,51 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[EVNT] MESSAGE RECEIVED')
         print('[INFO]')
         print('[JSON] ' + message)
-        try:
-            msg = json.loads(message)            
-            if(self.endpoint == ""): self.endpoint = msg['endpoint']
-            print('[INFO]')
-            print('[INFO] SENDER INFO')
-            print('[INFO] IP: ' + self.request.remote_ip)
-            print('[INFO] Account: ' + self.account)
-            print('[INFO] Endpoint: ' + self.endpoint)
-            print('[INFO] -----------------------------------------------------------------------')
-            print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
-            print('[INFO]')
-            globals()[msg['event']](self, msg['content'])
-        except TypeError: # for Byte[]
-            target = next((client for clinet in clients
-                           if client.account == self.target), None)
-            # target.write_message(message)
-        
+        msg = json.loads(message)            
+        if(self.endpoint == ""): self.endpoint = msg['endpoint']
+        if(self.endpoint == "Invigilator"): self.examinee = []
+        showClientInfo(self)
+        print('[INFO] -----------------------------------------------------------------------')
+        print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
+        print('[INFO]')
+        if(msg['endpoint'] == 'Invigilator'): invigilator = self
+        globals()[msg['event']](self, msg['content'])
+
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] CONNECTION CLOSED')
-        print('[INFO]')
-        print('[INFO] CLIENT INFO')
-        print('[INFO] IP: ' + self.request.remote_ip)
-        print('[INFO] Account: ' + self.account)
-        print('[INFO] Endpoint: ' + self.endpoint)
+        showClientInfo(self)
         print('[INFO] -----------------------------------------------------------------------')
         clients.remove(self)
         self.close()
 
+class ForwardHandler(websocket.WebSocketHandler):
+    def open(self, *args):
+        fclients.append(self)
+        print('[INFO] -----------------------------------------------------------------------')
+        print('[EVNT] FORWORD SOCKET CONNECTED')
+        print('[INFO] IP: ' + self.request.remote_ip)
+        print('[INFO] -----------------------------------------------------------------------')
+    
+    def on_message(self, message):
+        print('[INFO] -----------------------------------------------------------------------')
+        jsonSocket = next(c for c in clients if c.request.remote_ip == self.remote_ip)
+        if([fc for fc in fclients if fc.request.remote_ip == json.target] != []):
+            target = [fc for fc in fclients if fc.request.remote_ip == jsonSocket.target][0]
+            target.write_message(message)
+            print('[EVNT] DATA SEND')
+        else:
+            print('[ERRO] Invigilator not found')
+        print('[INFO] -----------------------------------------------------------------------')
+            
+    def on_close(self):
+        print('[INFO] -----------------------------------------------------------------------')
+        print('[EVNT] CONNECTION CLOSED')
+        print('[INFO] IP: ' + self.request.remote_ip)
+        print('[INFO] -----------------------------------------------------------------------')
+        fclients.remove(self)
+        self.close()
+        
 
 ##################################################
 #  VIEWS
@@ -68,16 +84,33 @@ class JSONHandler(websocket.WebSocketHandler):
 
 fmt = '%Y/%m/%d %H:%M:%S'
 
+def showClientInfo(self):
+    print('[INFO]')
+    print('[INFO] CLIENT INFO')
+    print('[INFO] IP: ' + self.request.remote_ip)
+    print('[INFO] Account: ' + self.account)
+    print('[INFO] Endpoint: ' + self.endpoint)
+
+def sendMsg(self, reContent):
+    print('[INFO] -----------------------------------------------------------------------')
+    print('[EVNT] MESSAGE SEND')
+    self.write_message(json.dumps(reContent))
+    print('[INFO] -----------------------------------------------------------------------')
+
 def pong(self, content):
     reContent = {"event": "pong",
                  "endpoint": "Server",
                  "content": {
                      "time": datetime.strftime(datetime.now(), fmt)}}
-    self.write_message(json.dumps(reContent))
-
-@gen.coroutine
+    sendMsg(self, reContent)
+    
 def login(self, content):
     try:
+        # next(client for client in clients
+        #      if client.account == content['account'])
+        if([client for client in clients
+            if client.account == content['account']] != []):
+            raise NameError('error')
         account = Account.objects.get(username=content['account'],
                                       password=content['password'])
         print('[INFO] LOGIN SUCCESS')
@@ -86,23 +119,24 @@ def login(self, content):
                      'content': {
                          'status': 'success'}}
         self.account = account.username
-    except ObjectDoesNotExist:
+    except (ObjectDoesNotExist, StopIteration) as e:
         print('[INFO] LOGIN FAILED')
+        if(type(e) == StopIteration):
+            reason = "Your account is already logged in!"
+        if(type(e) == ObjectDoesNotExist):
+            reason = "Account or Password is wrong!"
         reContent = {'event': 'login',
                      'endpoint': 'Servebr',
                      'content': {
                          'status': 'failed',
                          'code': '0',
-                         'reason': 'Account or Password is wrong.'}}
-    self.write_message(json.dumps(reContent))
-    yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
-    print('[ASYC] END OF LOGIN')
+                         'reason': reason}}
+    sendMsg(self, reContent)
 
 @gen.coroutine
 def checkExam(self):
     while(True):
-        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 30)
-        print('[TEST] ENTER checkExam')
+        print('[ASYC] ENTER checkExam')
         examList = Exam.objects.filter(enroll__student__account__username=self.account)
         for exam in examList:
             age = datetime.strptime(exam.timeslot.start_time) - datetime.now()
@@ -118,14 +152,17 @@ def checkExam(self):
                 reContent = {'event': event,
                              'endpoint': 'Server',
                              'content': {
-                                 'code': exam.enroll.course.code
+                                 'code': exam.enroll.course.code,
+                                 'start_time': exam.timeslot.start_time
                              }
                          }
-                self.write_message(json.dumps(reContent))
-
+                sendMsg(self, reContent)
+        print('[ASYC] LEAVE checkExam')
+        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 60)
     
 def profile(self, content):
-    s = Student.objects.get(account=Account.objects.get(username=content['account']))
+    checkExam(self)
+    s = Student.objects.get(account=Account.objects.get(username=self.account))
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
                    "status": "unbooked",
@@ -136,7 +173,7 @@ def profile(self, content):
                                     enroll__student=s)
         except ObjectDoesNotExist:
             exam = None
-        if(exam): # if booked
+        if(exam):
             c["status"] = "booked"
             c["start_time"] = exam.timeslot.start_time
             if(datetime.strptime(c["start_time"], fmt) - datetime.now() < timedelta(0)):
@@ -151,13 +188,12 @@ def profile(self, content):
     reContent = {"event": "profile",
                  "endpoint": "Server",
                  "content": {
-                     "account": content['account'],
-                     "profile":  {
+                     "profile": {
                          "courses": courseList
                      }
                  }
              }
-    self.write_message(json.dumps(reContent))
+    sendMsg(self, reContent)
 
 def booking(self, content):    
     tsList = [{"start_time": item.start_time}
@@ -168,13 +204,13 @@ def booking(self, content):
                      "code": content["code"],
                      "examTime": tsList
                  }
-             }    
-    self.write_message(json.dumps(reContent))
+             }
+    sendMsg(self, reContent)
 
 def booked(self, content):
     exam = Exam(enroll=Enroll.objects.get(
         student=Student.objects.get(
-            account=Account.objects.get(username=content["account"])),
+            account=Account.objects.get(username=self.account)),
         course=Course.objects.get(code=content["code"])),
         timeslot=ExamTimeslot.objects.get(start_time=content["start_time"],
                                           course__code=content["code"]),
@@ -186,14 +222,14 @@ def booked(self, content):
                  "content": {
                      "status": "success"
                  }
-             }    
-    self.write_message(json.dumps(reContent))
+             }
+    sendMsg(self, reContent)
     
 def exam_question(self, content):
     qList = [json.loads(item.content)
              for item in ExamQuestion.objects.filter(course__code=content["code"])]
     exam = Exam.objects.get(enroll=Enroll.objects.get(
-        student=Student.objects.get(account=Account.objects.get(username=content["account"])),
+        student=Student.objects.get(account=Account.objects.get(username=self.account)),
         course=Course.objects.get(code=content["code"])))
     reContent = {"event": "exam_question",
                  "endpoint": "Server",
@@ -203,8 +239,9 @@ def exam_question(self, content):
                      "question_set": qList
                  }
              }
-    self.target = exam.invigilator.account.username
-    self.write_message(json.dumps(reContent))
+    inv = [c for c in client if c.account == exam.invigilator.account.username][0]
+    self.target = inv.request.remote_ip
+    sendMsg(self, reContent)
     
 def exam_question_answer(self, content):
     for item in content["question_set"]:
@@ -219,11 +256,11 @@ def exam_question_answer(self, content):
                      "submission_status": "successful"
                  }
              }
-    self.write_message(json.dumps(reContent))
+    sendMsg(self, reContent)
         
 def cancel(self, content):
     exam = Exam.objects.get(enroll=Enroll.objects.get(
-        student=Student.objects.get(account=Account.objects.get(username=content["account"])),
+        student=Student.objects.get(account=Account.objects.get(username=self.account)),
         course=Course.objects.get(code=content["code"])))
     start_time = exam.timeslot.start_time
     exam.delete()
@@ -231,31 +268,33 @@ def cancel(self, content):
                  "endpoint": "Server",
                  "content": {
                      "code": content["code"],
-                     "account": content["account"],
                      "status": "successful",
                      "start_time": start_time
                  }
              }
-    self.write_message(json.dumps(reContent))
+    sendMsg(self, reContent)
 
 def exam_chat(self, content):
     ex = Exam.objects.get(pk=content["exam_pk"])
-    target = next((client for clinet in clients
-                   if client.account == ex.invigilator.account.username), None)
     chat = TextChat(exam=ex, content=content["msg"], time=content["system_time"])
     chat.save()
-    reContent = {}
-    target.write_message(json.dumps(reContent))
+    # reContent = {}
+    # sendMsg(self, reContent)
 
 
 ##################################################
 #  MAIN
 ##################################################
 
-app = web.Application([(r'/', JSONHandler),])
+JSONApp = web.Application([(r'/', JSONHandler),])
+VideoApp = web.Application([(r'/', ForwardHandler),])
+AudioApp = web.Application([(r'/', ForwardHandler),])
+ScreenApp = web.Application([(r'/', ForwardHandler),])
 
 if __name__ == '__main__':    
-    HTTPServer(app).listen(8087)
-    IOLoop.instance().add_callback(login)
+    HTTPServer(JSONApp).listen(8087)
+    HTTPServer(VideoApp).listen(8080)
+    HTTPServer(AudioApp).listen(8081)
+    HTTPServer(ScreenApp).listen(8082)
     IOLoop.instance().add_callback(checkExam)
     IOLoop.instance().start()
