@@ -137,27 +137,30 @@ def login(self, content):
     sendMsg(self, reContent)
 
 @gen.coroutine
-def checkExam(self):
+def checkExam(self, bList):
     cancelList = []
     confirmList = []
     blockList = []
     while(True):
         examList = Exam.objects.filter(enroll__student__account__username=self.account)
-        print('[ASYC] ENTER checkExam')
+        #print('[ASYC] ENTER checkExam')
         for exam in examList:
             age = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
-            if(age < timedelta(minutes=-15) and exam not in blockList):
-                event = "exam_disabled"
-                blockList.append(exam)
-                confirmList.append(exam)
-                cancelList.append(Exam)
-            elif(age < timedelta(minutes=15) and exam not in confirmList):
+            if(age < timedelta(minutes=-15) and exam.pk not in blockList):
+                if(exam.enroll.course.code not in bList):
+                    event = "exam_disabled"
+                else:
+                    event = None
+                blockList.append(exam.pk)
+                confirmList.append(exam.pk)
+                cancelList.append(exam.pk)
+            elif(age < timedelta(minutes=15) and exam.pk not in confirmList):
                 event = "exam_enabled"
-                confirmList.append(exam)
-                cancelList.append(Exam)
-            elif(age < timedelta(days=3) and exam not in cancelList):
+                confirmList.append(exam.pk)
+                cancelList.append(exam.pk)
+            elif(age < timedelta(days=3) and exam.pk not in cancelList):
                 event = "cancel_disabled"
-                cancelList.append(exam)
+                cancelList.append(exam.pk)
             else:
                 event = None
             if(event):
@@ -169,11 +172,10 @@ def checkExam(self):
                              }
                          }
                 sendMsg(self, reContent)
-        print('[ASYC] LEAVE checkExam')
+        #print('[ASYC] LEAVE checkExam')
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
     
 def profile(self, content):
-    checkExam(self)
     s = Student.objects.get(account=Account.objects.get(username=self.account))
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
@@ -205,7 +207,10 @@ def profile(self, content):
                      }
                  }
              }
+    bList = [course["code"] for course in courseList 
+             if course["status"] == "closed" or course["status"] == "finished"]
     sendMsg(self, reContent)
+    checkExam(self, bList)
 
 def booking(self, content):    
     tsList = [{"start_time": item.start_time}
