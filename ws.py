@@ -143,36 +143,28 @@ def checkExam(self, bList):
     blockList = []
     while(True):
         examList = Exam.objects.filter(enroll__student__account__username=self.account)
-        #print('[ASYC] ENTER checkExam')
         for exam in examList:
-            age = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
-            if(age < timedelta(minutes=-15) and exam.pk not in blockList):
-                if(exam.enroll.course.code not in bList):
-                    event = "exam_disabled"
-                else:
-                    event = None
-                blockList.append(exam.pk)
-                confirmList.append(exam.pk)
-                cancelList.append(exam.pk)
-            elif(age < timedelta(minutes=15) and exam.pk not in confirmList):
-                event = "exam_enabled"
-                confirmList.append(exam.pk)
-                cancelList.append(exam.pk)
-            elif(age < timedelta(days=3) and exam.pk not in cancelList):
-                event = "cancel_disabled"
-                cancelList.append(exam.pk)
-            else:
+            timeToExam = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
+            if(exam.enroll.course.code not in bList):
                 event = None
-            if(event):
-                reContent = {'event': event,
-                             'endpoint': 'Server',
-                             'content': {
-                                 'code': exam.enroll.course.code,
-                                 'start_time': exam.timeslot.start_time
+                if(timeToExam < timedelta(minutes=-15) and exam.pk not in blockList):
+                    event = "exam_disabled"
+                    blockList.append(exam.pk)
+                if(timeToExam < timedelta(minutes=15) and exam.pk not in confirmList):
+                    event = "exam_enabled"
+                    confirmList.append(exam.pk)
+                if(timeToExam < timedelta(days=3) and exam.pk not in cancelList):
+                    event = "cancel_disabled"
+                    cancelList.append(exam.pk)
+                if(event):
+                    reContent = {'event': event,
+                                 'endpoint': 'Server',
+                                 'content': {
+                                     'code': exam.enroll.course.code,
+                                     'start_time': exam.timeslot.start_time
+                                 }
                              }
-                         }
-                sendMsg(self, reContent)
-        #print('[ASYC] LEAVE checkExam')
+                    sendMsg(self, reContent)
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
     
 def profile(self, content):
