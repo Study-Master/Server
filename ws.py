@@ -14,7 +14,7 @@ import json
 ##################################################
 
 clients = []
-fclients = []
+p2pclients = []
 
 class JSONHandler(websocket.WebSocketHandler):
     def open(self, *args):
@@ -22,6 +22,8 @@ class JSONHandler(websocket.WebSocketHandler):
         self.account = ""
         self.endpoint = ""
         self.target = ""
+        self.startedExam = []
+        self.inProfileView = False
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
         showClientInfo(self)
@@ -30,7 +32,6 @@ class JSONHandler(websocket.WebSocketHandler):
     def on_message(self, message):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] MESSAGE RECEIVED')
-        print('[INFO]')
         print('[JSON] ' + message)
         msg = json.loads(message)            
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
@@ -38,8 +39,9 @@ class JSONHandler(websocket.WebSocketHandler):
         showClientInfo(self)
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
-        print('[INFO]')
-        if(msg['endpoint'] == 'Invigilator'): invigilator = self
+        print('[INFO] -----------------------------------------------------------------------')
+        if(msg['event'] == 'profile'): self.inProfileView = True
+        else: self.inProfileView = False
         globals()[msg['event']](self, msg['content'])
 
     def on_close(self):
@@ -50,20 +52,20 @@ class JSONHandler(websocket.WebSocketHandler):
         clients.remove(self)
         self.close()
 
-class ForwardHandler(websocket.WebSocketHandler):
+class P2PHandler(websocket.WebSocketHandler):
     def open(self, *args):
-        fclients.append(self)
+        p2pclients.append(self)
         print('[INFO] -----------------------------------------------------------------------')
-        print('[EVNT] FORWORD SOCKET CONNECTED')
+        print('[EVNT] P2P SOCKET CONNECTED')
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
     
     def on_message(self, message):
         print('[INFO] -----------------------------------------------------------------------')
         jsonSocket = next(c for c in clients if c.request.remote_ip == self.remote_ip)
-        if([fc for fc in fclients if fc.request.remote_ip == json.target] != []):
-            target = [fc for fc in fclients if fc.request.remote_ip == jsonSocket.target][0]
-            target.write_message(message)
+        targetList = [pc for pc in p2pclients if pc.request.remote_ip == json.target]
+        if(targetList != []):
+            targetList[0].write_message(message)
             print('[EVNT] DATA SEND')
         else:
             print('[ERRO] Invigilator not found')
@@ -74,7 +76,7 @@ class ForwardHandler(websocket.WebSocketHandler):
         print('[EVNT] CONNECTION CLOSED')
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
-        fclients.remove(self)
+        p2pclients.remove(self)
         self.close()
         
 
@@ -108,8 +110,6 @@ def pong(self, content):
     
 def login(self, content):
     try:
-        # next(client for client in clients
-        #      if client.account == content['account'])
         if([client for client in clients
             if client.account == content['account']] != []):
             raise NameError('error')
@@ -137,30 +137,33 @@ def login(self, content):
     sendMsg(self, reContent)
 
 @gen.coroutine
-def checkExam(self, bList):
-    cancelList = []
-    confirmList = []
-    blockList = []
-    while(True):
-        examList = Exam.objects.filter(enroll__student__account__username=self.account)
-        for exam in examList:
-            timeToExam = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
-            if(exam.enroll.course.code not in bList):
+def checkExam(self, arg):
+    print('[INFO] -----------------------------------------------------------------------')
+    print('[EVET] checkExam EVOKED')
+    while(self.inProfileView == True):
+        for course in courseList:
+            try:
+                exam = Exam.objects.get(enroll__student__account__username=self.account,
+                                        enroll__course__code=course["code"])
+            except ObjectDoesNotExist:
+                exam = None
+            if(exam):
+                timeToExam = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
                 event = None
-                if(timeToExam < timedelta(minutes=-15) and exam.pk not in blockList):
-                    event = "exam_disabled"
-                    blockList.append(exam.pk)
-                if(timeToExam < timedelta(minutes=15) and exam.pk not in confirmList):
-                    event = "exam_enabled"
-                    confirmList.append(exam.pk)
-                if(timeToExam < timedelta(days=3) and exam.pk not in cancelList):
+                if(timeToExam < timedelta(days=3) and course["status"] == "booked"):
                     event = "cancel_disabled"
-                    cancelList.append(exam.pk)
+                    course["status"] = "confirmed"
+                if(timeToExam < timedelta(minutes=15) and course["status"] == "confirmed"):
+                    event = "exam_enabled"
+                    course["status"] = "exam"
+                if(timeToExam < timedelta(minutes=-15) and course["status"] == "exam"):
+                    event = "exam_disabled"
+                    course["status"] = "finished"
                 if(event):
                     reContent = {'event': event,
                                  'endpoint': 'Server',
                                  'content': {
-                                     'code': exam.enroll.course.code,
+                                     'code': course["code"],
                                      'start_time': exam.timeslot.start_time
                                  }
                              }
@@ -173,24 +176,25 @@ def profile(self, content):
                    "name": e.course.name,
                    "status": "unbooked",
                    "start_time": ""} for e in Enroll.objects.filter(student=s)]
-    for c in courseList:
+    for course in courseList:
         try:
-            exam = Exam.objects.get(enroll__course__code=c["code"],
+            exam = Exam.objects.get(enroll__course__code=course["code"],
                                     enroll__student=s)
         except ObjectDoesNotExist:
             exam = None
         if(exam):
-            c["status"] = "booked"
-            c["start_time"] = exam.timeslot.start_time
-            if(datetime.strptime(c["start_time"], fmt) - datetime.now() < timedelta(0)):
-                c["status"] = "finished"
+            course["status"] = "booked"
+            course["start_time"] = exam.timeslot.start_time
+            timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+            if(timeToExam < timedelta(minutes=-15)):
+                course["status"] = "finished"
         else:
             tsList = [datetime.strptime(item.start_time, fmt)
-                      for item in ExamTimeslot.objects.filter(course__code=c["code"])]
-            if(tsList == [] or datetime.now() > max(tsList)):
-                c["status"] = "closed"
+                      for item in ExamTimeslot.objects.filter(course__code=course["code"])]
+            if(tsList == [] or max(tsList) - datetime.now() < timedelta(days=3)):
+                course["status"] = "closed"
             else:
-                c["start_time"] = datetime.strftime(max(tsList), fmt)
+                course["start_time"] = datetime.strftime(max(tsList), fmt)
     reContent = {"event": "profile",
                  "endpoint": "Server",
                  "content": {
@@ -202,9 +206,9 @@ def profile(self, content):
     bList = [course["code"] for course in courseList 
              if course["status"] == "closed" or course["status"] == "finished"]
     sendMsg(self, reContent)
-    checkExam(self, bList)
+    checkExam(self, courseList)
 
-def booking(self, content):    
+def booking(self, content):
     tsList = [{"start_time": item.start_time}
               for item in ExamTimeslot.objects.filter(course__code=content["code"])]
     reContent = {"event": "booking",
@@ -296,9 +300,9 @@ def exam_chat(self, content):
 ##################################################
 
 JSONApp = web.Application([(r'/', JSONHandler),])
-VideoApp = web.Application([(r'/', ForwardHandler),])
-AudioApp = web.Application([(r'/', ForwardHandler),])
-ScreenApp = web.Application([(r'/', ForwardHandler),])
+VideoApp = web.Application([(r'/', P2PHandler),])
+AudioApp = web.Application([(r'/', P2PHandler),])
+ScreenApp = web.Application([(r'/', P2PHandler),])
 
 if __name__ == '__main__':    
     HTTPServer(JSONApp).listen(8087)
