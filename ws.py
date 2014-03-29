@@ -26,7 +26,7 @@ class JSONHandler(websocket.WebSocketHandler):
         self.inProfileView = False
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
-        showClientInfo(self)
+        self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
     
     def on_message(self, message):
@@ -36,7 +36,7 @@ class JSONHandler(websocket.WebSocketHandler):
         msg = json.loads(message)            
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
         if(self.endpoint == "Invigilator"): self.examinee = []
-        showClientInfo(self)
+        self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
         print('[INFO] -----------------------------------------------------------------------')
@@ -47,10 +47,17 @@ class JSONHandler(websocket.WebSocketHandler):
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] CONNECTION CLOSED')
-        showClientInfo(self)
+        self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
         clients.remove(self)
         self.close()
+
+    def show_client_info(self):
+        print('[INFO]')
+        print('[INFO] CLIENT INFO')
+        print('[INFO] IP: ' + self.request.remote_ip)
+        print('[INFO] Account: ' + self.account)
+        print('[INFO] Endpoint: ' + self.endpoint)
 
 class P2PHandler(websocket.WebSocketHandler):
     def open(self, *args):
@@ -86,14 +93,7 @@ class P2PHandler(websocket.WebSocketHandler):
 
 fmt = '%Y/%m/%d %H:%M:%S'
 
-def showClientInfo(self):
-    print('[INFO]')
-    print('[INFO] CLIENT INFO')
-    print('[INFO] IP: ' + self.request.remote_ip)
-    print('[INFO] Account: ' + self.account)
-    print('[INFO] Endpoint: ' + self.endpoint)
-
-def sendMsg(self, reContent):
+def send_msg(self, reContent):
     print('[INFO] -----------------------------------------------------------------------')
     print('[EVNT] MESSAGE SEND')
     msg = json.dumps(reContent)
@@ -101,13 +101,6 @@ def sendMsg(self, reContent):
     self.write_message(msg)
     print('[INFO] -----------------------------------------------------------------------')
 
-def pong(self, content):
-    reContent = {"event": "pong",
-                 "endpoint": "Server",
-                 "content": {
-                     "time": datetime.strftime(datetime.now(), fmt)}}
-    sendMsg(self, reContent)
-    
 def login(self, content):
     try:
         if([client for client in clients
@@ -129,17 +122,17 @@ def login(self, content):
         if(type(e) == ObjectDoesNotExist):
             reason = "Account or Password is wrong!"
         reContent = {'event': 'login',
-                     'endpoint': 'Servebr',
+                     'endpoint': 'Server',
                      'content': {
                          'status': 'failed',
                          'code': '0',
                          'reason': reason}}
-    sendMsg(self, reContent)
+    send_msg(self, reContent)
 
 @gen.coroutine
-def checkExam(self, arg):
+def check_exam(self, arg):
     print('[INFO] -----------------------------------------------------------------------')
-    print('[EVET] checkExam EVOKED')
+    print('[EVET] check_exam EVOKED')
     while(self.inProfileView == True):
         for course in courseList:
             try:
@@ -167,7 +160,7 @@ def checkExam(self, arg):
                                      'start_time': exam.timeslot.start_time
                                  }
                              }
-                    sendMsg(self, reContent)
+                    send_msg(self, reContent)
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
     
 def profile(self, content):
@@ -209,8 +202,8 @@ def profile(self, content):
              }
     bList = [course["code"] for course in courseList 
              if course["status"] == "closed" or course["status"] == "finished"]
-    sendMsg(self, reContent)
-    checkExam(self, courseList)
+    send_msg(self, reContent)
+    check_exam(self, courseList)
 
 def booking(self, content):
     tsList = [{"start_time": item.start_time}
@@ -226,14 +219,16 @@ def booking(self, content):
             delta = tsd - time
             if(timedelta(hours=-1) < delta < timedelta(hours=1)):
                 tsList.remove(ts)
+    name = Course.objects.get(code=content["code"]).name
     reContent = {"event": "booking",
                  "endpoint": "Server",
                  "content": {
                      "code": content["code"],
+                     "name": name,
                      "examTime": tsList
                  }
              }
-    sendMsg(self, reContent)
+    send_msg(self, reContent)
 
 def booked(self, content):
     exam = Exam(enroll=Enroll.objects.get(
@@ -251,7 +246,7 @@ def booked(self, content):
                      "status": "success"
                  }
              }
-    sendMsg(self, reContent)
+    send_msg(self, reContent)
     
 def exam_question(self, content):
     qList = [json.loads(item.content)
@@ -267,9 +262,9 @@ def exam_question(self, content):
                      "question_set": qList
                  }
              }
-    inv = [c for c in client if c.account == exam.invigilator.account.username][0]
-    self.target = inv.request.remote_ip
-    sendMsg(self, reContent)
+    # inv = [c for c in clients if c.account == exam.invigilator.account.username][0]
+    # self.target = inv.request.remote_ip
+    send_msg(self, reContent)
     
 def exam_question_answer(self, content):
     for item in content["question_set"]:
@@ -284,7 +279,7 @@ def exam_question_answer(self, content):
                      "submission_status": "successful"
                  }
              }
-    sendMsg(self, reContent)
+    send_msg(self, reContent)
         
 def cancel(self, content):
     exam = Exam.objects.get(enroll=Enroll.objects.get(
@@ -300,14 +295,14 @@ def cancel(self, content):
                      "start_time": start_time
                  }
              }
-    sendMsg(self, reContent)
+    send_msg(self, reContent)
 
 def exam_chat(self, content):
     ex = Exam.objects.get(pk=content["exam_pk"])
     chat = TextChat(exam=ex, content=content["msg"], time=content["system_time"])
     chat.save()
     # reContent = {}
-    # sendMsg(self, reContent)
+    # send_msg(self, reContent)
 
 
 ##################################################
@@ -324,5 +319,5 @@ if __name__ == '__main__':
     HTTPServer(VideoApp).listen(8080)
     HTTPServer(AudioApp).listen(8081)
     HTTPServer(ScreenApp).listen(8082)
-    IOLoop.instance().add_callback(checkExam)
+    IOLoop.instance().add_callback(check_exam)
     IOLoop.instance().start()
