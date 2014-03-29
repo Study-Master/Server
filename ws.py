@@ -171,21 +171,25 @@ def checkExam(self, arg):
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
     
 def profile(self, content):
-    s = Student.objects.get(account=Account.objects.get(username=self.account))
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
                    "status": "unbooked",
-                   "start_time": ""} for e in Enroll.objects.filter(student=s)]
+                   "start_time": ""}
+                  for e in Enroll.objects.filter(student__account__username=self.account)]
     for course in courseList:
         try:
-            exam = Exam.objects.get(enroll__course__code=course["code"],
-                                    enroll__student=s)
+            exam = Exam.objects.get(enroll__student__account__username=self.account,
+                                    enroll__course__code=course["code"])
         except ObjectDoesNotExist:
             exam = None
         if(exam):
             course["status"] = "booked"
             course["start_time"] = exam.timeslot.start_time
             timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+            if(timeToExam < timedelta(days=3)):
+                course["status"] = "confirmed"
+            if(timeToExam < timedelta(minutes=15)):
+                course["status"] = "exam"
             if(timeToExam < timedelta(minutes=-15)):
                 course["status"] = "finished"
         else:
@@ -211,6 +215,17 @@ def profile(self, content):
 def booking(self, content):
     tsList = [{"start_time": item.start_time}
               for item in ExamTimeslot.objects.filter(course__code=content["code"])]
+    timeList = [datetime.strptime(exam.timeslot.start_time, fmt) for exam in
+                Exam.objects.filter(enroll__student__account__username=self.account)]
+    for ts in tsList:
+        tsd = datetime.strptime(ts["start_time"], fmt)
+        timeToExam = tsd - datetime.now()
+        if(timeToExam < timedelta(days=3)):
+            tsList.remove(ts)
+        for time in timeList:
+            delta = tsd - time
+            if(timedelta(hours=-1) < delta < timedelta(hours=1)):
+                tsList.remove(ts)
     reContent = {"event": "booking",
                  "endpoint": "Server",
                  "content": {
