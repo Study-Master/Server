@@ -23,7 +23,7 @@ class JSONHandler(websocket.WebSocketHandler):
         self.endpoint = ""
         self.target = ""
         self.startedExam = []
-        self.inProfileView = False
+        self.inProfileView = False        
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
         self.show_client_info()
@@ -35,12 +35,13 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[JSON] ' + message)
         msg = json.loads(message)            
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
-        if(self.endpoint == "Invigilator"): self.examinee = []
+        if(self.endpoint == "Invigilator"):
+            self.examinee = []
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
         print('[INFO] -----------------------------------------------------------------------')
-        if(msg['event'] == 'profile'): self.inProfileView = True
+        if(msg['event'] == 'profile' or 'profile_invigilator'): self.inProfileView = True
         else: self.inProfileView = False
         globals()[msg['event']](self, msg['content'])
 
@@ -161,7 +162,10 @@ def check_exam(self, arg):
                                  }
                              }
                     send_msg(self, reContent)
-        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 5)
+        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 3)
+    print('[EVET] check_exam FINISHED')
+    print('[INFO] -----------------------------------------------------------------------')
+
     
 def profile(self, content):
     courseList = [{"code": e.course.code,
@@ -304,7 +308,46 @@ def exam_chat(self, content):
     # reContent = {}
     # send_msg(self, reContent)
 
+def profile_invigilator(self, content):
+    courseList = [{"code": e.enroll.course.code,
+                   "name": e.enroll.course.name,
+                   "status": "waiting",
+                   "start_time": e.timeslot.start_time}
+                  for e in Exam.objects.filter(invigilator__account__username=self.account)]
+    for course in courseList:
+        timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+        if(timeToExam < timedelta(minutes=15)):
+            course["status"] = "invigilate"
+        if(timeToExam < timedelta(minutes=-15)):
+            course["status"] = "finished"
+    reContent = {"event": "profile_invigilator",
+                 "endpoint": "Server",
+                 "content": {   
+                     "profile": {"courses": courseList}}}
+    send_msg(self, reContent)
+    check_invigilate(self, courseList)
 
+@gen.coroutine
+def check_invigilate(self, courseList):
+    print('[INFO] -----------------------------------------------------------------------')
+    print('[EVET] check_invigilate EVOKED')
+    while(self.inProfileView):
+        for course in courseList:
+            timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+            if(timeToExam < timedelta(minutes=15) and course["status"] == "waiting"):
+                course["status"] = "invigilate"
+                reContent = {"event": "enable_invigilation",
+                             "endpoint": "Server",
+                             "content": {
+                                 "code": course["code"]
+                             }
+                         }
+                send_msg(self, reContent)
+        yield gen.Task(IOLoop.instance().add_timeout, time.time() + 3)
+    print('[EVET] check_invigilate FINISHED')
+    print('[INFO] -----------------------------------------------------------------------')
+
+    
 ##################################################
 #  MAIN
 ##################################################
