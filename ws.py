@@ -347,6 +347,15 @@ def check_invigilate(self, courseList):
     print('[EVET] check_invigilate FINISHED')
     print('[INFO] -----------------------------------------------------------------------')
 
+# def invigilate(self, content):
+#     reContent = {"event": "invigilate",
+#                  "endpoint": "start_invigilation",
+#                  "content": {
+#                      "code": 
+#                  }
+#              }
+#     send_msg(self, reContent)
+
     
 ##################################################
 #  MAIN
