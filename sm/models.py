@@ -1,4 +1,5 @@
 from django.db import models
+from django.core.exceptions import ObjectDoesNotExist
 from datetime import datetime, timedelta
 
 fmt = '%Y/%m/%d %H:%M:%S'
@@ -23,12 +24,15 @@ class Course(models.Model):
     code = models.CharField(max_length=6)
     name = models.CharField(max_length=30)
 
-    def get_examinee_status(self, account):
+    def get_exam(self, account):
         try:
             exam = Exam.objects.get(enroll__student__account__username=account,
                                     enroll__course__code=self.code)
         except ObjectDoesNotExist:
             exam = None
+
+    def get_examinee_status(self, account):
+        exam = self.get_exam(account)
         if(exam):
             result = "booked"
             if(exam.get_examinee_status()):
@@ -40,6 +44,13 @@ class Course(models.Model):
                 result = "closed"
             else:
                 result = "unbooked"
+
+    def get_start_time(self, account):
+        if(self.get_examinee_status(account) != "closed" or "unbooked" or "finished"):
+            exam = self.get_exam(account)
+            return exam.timeslot.start_time
+        else:
+            return ""
                 
 class ExamTimeslot(models.Model):
     course = models.ForeignKey(Course)
@@ -69,7 +80,17 @@ class Exam(models.Model):
         if(timeToExam < timedelta(minutes=-15)):
             result = "finished"
         return result
-        
+
+    def get_event(self, status):
+        timeToExam = datetime.strptime(self.timeslot.start_time, fmt) - datetime.now()
+        event = None
+        if(timeToExam < timedelta(days=3) and status == "booked"):
+            event = "cancel_disabled"
+        if(timeToExam < timedelta(minutes=15) and status == "confirmed"):
+            event = "exam_enabled"
+        if(timeToExam < timedelta(minutes=-15) and status == "exam"):
+            event = "exam_disabled"
+        return event
     
 class Answer(models.Model):
     exam = models.ForeignKey(Exam)
