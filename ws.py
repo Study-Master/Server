@@ -131,23 +131,37 @@ def login(self, content):
     send_msg(self, reContent)
 
 @gen.coroutine
-def check_exam(self, courseList):
+def check_exam(self, arg):
     print('[INFO] -----------------------------------------------------------------------')
     print('[EVET] check_exam EVOKED')
     while(self.inProfileView == True):
         for course in courseList:
-            c = Course.objects.get(code=course["code"])
-            exam = c.get_exam(self.account)
-            event = exam.get_event(course["status"])
-            if(event):
-                reContent = {'event': event,
-                             'endpoint': 'Server',
-                             'content': {
-                                 'code': course["code"],
-                                 'start_time': exam.timeslot.start_time
+            try:
+                exam = Exam.objects.get(enroll__student__account__username=self.account,
+                                        enroll__course__code=course["code"])
+            except ObjectDoesNotExist:
+                exam = None
+            if(exam):
+                timeToExam = datetime.strptime(exam.timeslot.start_time, fmt) - datetime.now()
+                event = None
+                if(timeToExam < timedelta(days=3) and course["status"] == "booked"):
+                    event = "cancel_disabled"
+                    course["status"] = "confirmed"
+                if(timeToExam < timedelta(minutes=15) and course["status"] == "confirmed"):
+                    event = "exam_enabled"
+                    course["status"] = "exam"
+                if(timeToExam < timedelta(minutes=-15) and course["status"] == "exam"):
+                    event = "exam_disabled"
+                    course["status"] = "finished"
+                if(event):
+                    reContent = {'event': event,
+                                 'endpoint': 'Server',
+                                 'content': {
+                                     'code': course["code"],
+                                     'start_time': exam.timeslot.start_time
+                                 }
                              }
-                }
-                send_msg(self, reContent)
+                    send_msg(self, reContent)
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 3)
     print('[EVET] check_exam FINISHED')
     print('[INFO] -----------------------------------------------------------------------')
@@ -156,9 +170,32 @@ def check_exam(self, courseList):
 def profile(self, content):
     courseList = [{"code": e.course.code,
                    "name": e.course.name,
-                   "status": e.course.get_examinee_status(self.account),
-                   "start_time": e.course.get_start_time(self.account)}
+                   "status": "unbooked",
+                   "start_time": ""}
                   for e in Enroll.objects.filter(student__account__username=self.account)]
+    for course in courseList:
+        try:
+            exam = Exam.objects.get(enroll__student__account__username=self.account,
+                                    enroll__course__code=course["code"])
+        except ObjectDoesNotExist:
+            exam = None
+        if(exam):
+            course["status"] = "booked"
+            course["start_time"] = exam.timeslot.start_time
+            timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+            if(timeToExam < timedelta(days=3)):
+                course["status"] = "confirmed"
+            if(timeToExam < timedelta(minutes=15)):
+                course["status"] = "exam"
+            if(timeToExam < timedelta(minutes=-15)):
+                course["status"] = "finished"
+        else:
+            tsList = [datetime.strptime(item.start_time, fmt)
+                      for item in ExamTimeslot.objects.filter(course__code=course["code"])]
+            if(tsList == [] or max(tsList) - datetime.now() < timedelta(days=3)):
+                course["status"] = "closed"
+            else:
+                course["start_time"] = datetime.strftime(max(tsList), fmt)
     reContent = {"event": "profile",
                  "endpoint": "Server",
                  "content": {
@@ -167,6 +204,8 @@ def profile(self, content):
                      }
                  }
              }
+    bList = [course["code"] for course in courseList 
+             if course["status"] == "closed" or course["status"] == "finished"]
     send_msg(self, reContent)
     check_exam(self, courseList)
 
@@ -307,15 +346,6 @@ def check_invigilate(self, courseList):
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 3)
     print('[EVET] check_invigilate FINISHED')
     print('[INFO] -----------------------------------------------------------------------')
-
-def invigilate(self, content):
-    reContent = {"event": "invigilate",
-                 "endpoint": "start_invigilation",
-                 "content": {
-                     "code": 
-                 }
-             }
-    send_msg(self, reContent)
 
     
 ##################################################
