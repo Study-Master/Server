@@ -50,7 +50,8 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[EVNT] CONNECTION CLOSED')
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
-        clients.remove(self)
+        list_remove(clients, self.account)
+        list_remove(p2pclients, self.account)
         self.close()
 
     def show_client_info(self):
@@ -116,12 +117,10 @@ def login(self, content):
                          'status': 'success'}}
         self.account = account.username
     except (ObjectDoesNotExist, NameError) as e:
-        reason = ""
-        print('[INFO] LOGIN FAILED')
+        reason = "Account or Password is wrong!"
+        print('[EVET] LOGIN FAILED')
         if(type(e) == NameError):
             reason = "Your account is already logged in!"
-        if(type(e) == ObjectDoesNotExist):
-            reason = "Account or Password is wrong!"
         reContent = {'event': 'login',
                      'endpoint': 'Server',
                      'content': {
@@ -347,7 +346,22 @@ def check_invigilate(self, courseList):
     print('[EVET] check_invigilate FINISHED')
     print('[INFO] -----------------------------------------------------------------------')
 
-    
+def logout(self, content):
+    reContent = {"event": "logout",
+                "endpoint": "Server",
+                 "content": {
+                     "status": "success",
+                 }
+             }
+    send_msg(self, reContent)
+    list_remove(clients, self.account)
+    list_remove(p2pclients, self.account)
+
+def list_remove(clients, account):
+    for c in clients:
+        if(c.account == account):
+            clients.remove(c)
+
 ##################################################
 #  MAIN
 ##################################################
