@@ -130,7 +130,7 @@ def login(self, content):
     send_msg(self, reContent)
 
 @gen.coroutine
-def check_exam(self, arg):
+def check_exam(self, courseList):
     print('[INFO] -----------------------------------------------------------------------')
     print('[EVET] check_exam EVOKED')
     while(self.inProfileView == True):
