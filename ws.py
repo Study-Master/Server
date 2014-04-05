@@ -15,6 +15,8 @@ import json
 
 clients = []
 p2pclients = []
+videoclients = []
+screenclients = []
 
 class JSONHandler(websocket.WebSocketHandler):
     def open(self, *args):
@@ -39,7 +41,6 @@ class JSONHandler(websocket.WebSocketHandler):
             self.inProfileView = False
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
         if(self.endpoint == "Invigilator"):
-            self.examinees = []
             self.inExamView = False
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
@@ -64,20 +65,24 @@ class JSONHandler(websocket.WebSocketHandler):
 
 class P2PHandler(websocket.WebSocketHandler):
     def open(self, *args):
+        self.set_nodelay(True)
         p2pclients.append(self)
         self.endpoint = ""
         self.target = None
+        self.json_target = None
+        self.content_type = ""
         if(self.is_examinee()):
-            print('[DBUG] IS EXAMINEE!!!')
             self.endpoint = "Examinee"
+            self.json_target = self.get_invigilator_json()
             self.target = self.get_invigilator_p2p()
             reContent = {"event": "examinee_come_in",
                          "endpoint": "Server",
                          "content": {
-                             "name": self.get_examinee_json().account
+                             "name": self.get_examinee_json().account,
+                             "type": self.content_type
                          }
                      }
-            self.target.write_message(json.dumps(reContent))
+            self.json_target.write_message(json.dumps(reContent))
             print('[EVNT] examinee_come_in JSON SEND')
         else:
             self.endpoint = "Invigilator"
@@ -86,25 +91,18 @@ class P2PHandler(websocket.WebSocketHandler):
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] endpoint: ' + self.endpoint)
         if(self.target):
-            print('[INFO] target ip: ' + self.target.request.remote_ip)
+            print('[INFO] p2p target ip: ' + self.target.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
         print('[DBUG] client list: ' + str([c.endpoint for c in clients]))
     
     def on_message(self, message):
-        print('[INFO] -----------------------------------------------------------------------')
         if(self.endpoint == "Examinee"):
             self.target.write_message(message, binary=True)
-            print('[EVNT] DATA SEND')
-        else:
-            print('[EVET] DATA RECEIVED')
-        # LOGGER
-        # print("account: " + message[:50].decode('utf-8'))
-        # print("type: " + message[50:100].decode('utf-8'))
-        print('[INFO] -----------------------------------------------------------------------')
-            
+
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] CONNECTION CLOSED')
+        print('[INFO] endpoint: ' + self.endpoint)
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
         list_remove(p2pclients, self.request.remote_ip)
@@ -129,15 +127,18 @@ class P2PHandler(websocket.WebSocketHandler):
         return targetList[0]
 
     def get_invigilator_json(self):
+        examineeJson = self.get_examinee_json()
         print('[DBUG] ENTER get_invigilator_json')
         print(clients)
-        invJson = [c for c in clients if c.request.remote_ip == self.request.remote_ip][0]
+        invJson = [c for c in clients
+                   if c.request.remote_ip == examineeJson.target.request.remote_ip][0]
         print(invJson)
         print('[DBUG] invJson: ' + invJson.request.remote_ip)
         return invJson
 
-        
+# class VideoHandler(P2PHandler):
 
+    
 ##################################################
 #  VIEWS
 ##################################################
@@ -329,12 +330,9 @@ def exam_question_answer(self, content):
                         question=ExamQuestion.objects.get(pk=item["pk"]),
                         answer=item["question_content"]["answer"])
         answer.save()
-    reContent = {"event": "submission_message",
+    reContent = {"event": "submission_successful",
                  "endpoint": "Server",
-                 "content": {
-                     "code": "CZ0001",
-                     "submission_status": "successful"
-                 }
+                 "content": None
              }
     send_msg(self, reContent)
         
@@ -358,8 +356,17 @@ def exam_chat(self, content):
     ex = Exam.objects.get(pk=content["exam_pk"])
     chat = TextChat(exam=ex, content=content["msg"], time=content["system_time"])
     chat.save()
-    # reContent = {}
-    # send_msg(self, reContent)
+    reContent = {"event": "exam_chat",
+                 "endpoint": self.endpoint,
+                 "content": content}
+    target = None
+    if(self.endpoint == "Examinee"):
+        target = self.target            
+    else:
+        target = [c for c in clients
+                  if c.account == ex.enroll.student.account.username
+                  and c.endpoint == "Examinee"][0]
+    send_msg(target, reContent)
 
 def profile_invigilator(self, content):
     examListRaw = [{"code": e.enroll.course.code,
@@ -434,11 +441,13 @@ def list_remove(clients, ip):
 ##################################################
 
 JSONApp = web.Application([(r'/', JSONHandler),])
-P2PApp = web.Application([(r'/', P2PHandler),])
+VideoApp = web.Application([(r'/', P2PHandler),])
+ScreenApp = web.Application([(r'/', P2PHandler),])
 
 if __name__ == '__main__':    
     HTTPServer(JSONApp).listen(8087)
-    HTTPServer(P2PApp).listen(8080)
+    HTTPServer(VideoApp).listen(8080)
+    HTTPServer(ScreenApp).listen(8081)
     IOLoop.instance().add_callback(check_exam)
     IOLoop.instance().add_callback(check_invigilate)
     IOLoop.instance().start()
