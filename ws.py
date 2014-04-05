@@ -14,7 +14,6 @@ import json
 ##################################################
 
 clients = []
-p2pclients = []
 videoclients = []
 screenclients = []
 
@@ -64,13 +63,16 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[INFO] Endpoint: ' + self.endpoint)
 
 class P2PHandler(websocket.WebSocketHandler):
-    def open(self, *args):
+    def open(self):
+        self.content_type = ""
+        self.setup()
+
+    def setup(self):
         self.set_nodelay(True)
-        p2pclients.append(self)
+        globals()[self.content_type+'clients'].append(self)
         self.endpoint = ""
         self.target = None
         self.json_target = None
-        self.content_type = ""
         if(self.is_examinee()):
             self.endpoint = "Examinee"
             self.json_target = self.get_invigilator_json()
@@ -105,7 +107,7 @@ class P2PHandler(websocket.WebSocketHandler):
         print('[INFO] endpoint: ' + self.endpoint)
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
-        list_remove(p2pclients, self.request.remote_ip)
+        list_remove(globals()[self.content_type+'clients'], self.request.remote_ip)
         self.close()
 
     def is_examinee(self):
@@ -120,8 +122,7 @@ class P2PHandler(websocket.WebSocketHandler):
     def get_invigilator_p2p(self):
         examineeJson = self.get_examinee_json()
         print('[DBUG] examineeJson: ' + examineeJson.target.request.remote_ip)
-        print('[DBUG] p2pclients: ' + str([pc.request.remote_ip for pc in p2pclients]))
-        targetList = [pc for pc in p2pclients
+        targetList = [pc for pc in globals()[self.content_type+'clients']
                       if pc.request.remote_ip == examineeJson.target.request.remote_ip]
         print('[DBUG] targetList: ' + targetList[0].request.remote_ip)
         return targetList[0]
@@ -136,7 +137,15 @@ class P2PHandler(websocket.WebSocketHandler):
         print('[DBUG] invJson: ' + invJson.request.remote_ip)
         return invJson
 
-# class VideoHandler(P2PHandler):
+class VideoHandler(P2PHandler):
+    def open(self):
+        self.content_type = "video"
+        self.setup()
+
+class ScreenHandler(P2PHandler):
+    def open(self):
+        self.content_type = "screen"
+        self.setup()
 
     
 ##################################################
@@ -429,7 +438,9 @@ def logout(self, content):
              }
     send_msg(self, reContent)
     list_remove(clients, self.request.remote_ip)
-    list_remove(p2pclients, self.request.remote_ip)
+    list_remove(videoclients, self.request.remote_ip)
+    list_remove(screenclients, self.request.remote_ip)
+
 
 def list_remove(clients, ip):
     for c in clients:
@@ -441,8 +452,8 @@ def list_remove(clients, ip):
 ##################################################
 
 JSONApp = web.Application([(r'/', JSONHandler),])
-VideoApp = web.Application([(r'/', P2PHandler),])
-ScreenApp = web.Application([(r'/', P2PHandler),])
+VideoApp = web.Application([(r'/', VideoHandler),])
+ScreenApp = web.Application([(r'/', ScreenHandler),])
 
 if __name__ == '__main__':    
     HTTPServer(JSONApp).listen(8087)
