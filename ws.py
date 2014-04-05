@@ -21,8 +21,7 @@ class JSONHandler(websocket.WebSocketHandler):
         clients.append(self)
         self.account = ""
         self.endpoint = ""
-        self.target = ""
-        self.startedExam = []
+        self.target = None
         self.inProfileView = False        
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
@@ -33,16 +32,19 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] MESSAGE RECEIVED')
         print('[JSON] ' + message)
-        msg = json.loads(message)            
+        msg = json.loads(message)
+        if(msg['event'] == 'profile' or 'profile_invigilator'):
+            self.inProfileView = True
+        else:
+            self.inProfileView = False
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
         if(self.endpoint == "Invigilator"):
-            self.examinee = []
+            self.examinees = []
+            self.inExamView = False
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
         print('[INFO] -----------------------------------------------------------------------')
-        if(msg['event'] == 'profile' or 'profile_invigilator'): self.inProfileView = True
-        else: self.inProfileView = False
         globals()[msg['event']](self, msg['content'])
 
     def on_close(self):
@@ -50,8 +52,7 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[EVNT] CONNECTION CLOSED')
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
-        list_remove(clients, self.account)
-        list_remove(p2pclients, self.account)
+        list_remove(clients, self.request.remote_ip)
         self.close()
 
     def show_client_info(self):
@@ -64,20 +65,41 @@ class JSONHandler(websocket.WebSocketHandler):
 class P2PHandler(websocket.WebSocketHandler):
     def open(self, *args):
         p2pclients.append(self)
+        self.endpoint = ""
+        self.target = None
+        if(self.is_examinee()):
+            print('[DBUG] IS EXAMINEE!!!')
+            self.endpoint = "Examinee"
+            self.target = self.get_invigilator_p2p()
+            reContent = {"event": "examinee_come_in",
+                         "endpoint": "Server",
+                         "content": {
+                             "name": self.get_examinee_json().account
+                         }
+                     }
+            self.target.write_message(json.dumps(reContent))
+            print('[EVNT] examinee_come_in JSON SEND')
+        else:
+            self.endpoint = "Invigilator"
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] P2P SOCKET CONNECTED')
         print('[INFO] IP: ' + self.request.remote_ip)
+        print('[INFO] endpoint: ' + self.endpoint)
+        if(self.target):
+            print('[INFO] target ip: ' + self.target.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
+        print('[DBUG] client list: ' + str([c.endpoint for c in clients]))
     
     def on_message(self, message):
         print('[INFO] -----------------------------------------------------------------------')
-        jsonSocket = next(c for c in clients if c.request.remote_ip == self.remote_ip)
-        targetList = [pc for pc in p2pclients if pc.request.remote_ip == json.target]
-        if(targetList != []):
-            targetList[0].write_message(message)
+        if(self.endpoint == "Examinee"):
+            self.target.write_message(message, binary=True)
             print('[EVNT] DATA SEND')
         else:
-            print('[ERRO] Invigilator not found')
+            print('[EVET] DATA RECEIVED')
+        # LOGGER
+        # print("account: " + message[:50].decode('utf-8'))
+        # print("type: " + message[50:100].decode('utf-8'))
         print('[INFO] -----------------------------------------------------------------------')
             
     def on_close(self):
@@ -85,8 +107,35 @@ class P2PHandler(websocket.WebSocketHandler):
         print('[EVNT] CONNECTION CLOSED')
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
-        p2pclients.remove(self)
+        list_remove(p2pclients, self.request.remote_ip)
         self.close()
+
+    def is_examinee(self):
+        return self.request.remote_ip in [c.request.remote_ip for c in clients
+                                      if c.endpoint == "Examinee"]
+
+    def get_examinee_json(self):
+        return [c for c in clients
+                if c.request.remote_ip == self.request.remote_ip
+                and c.endpoint == "Examinee"][0]
+    
+    def get_invigilator_p2p(self):
+        examineeJson = self.get_examinee_json()
+        print('[DBUG] examineeJson: ' + examineeJson.target.request.remote_ip)
+        print('[DBUG] p2pclients: ' + str([pc.request.remote_ip for pc in p2pclients]))
+        targetList = [pc for pc in p2pclients
+                      if pc.request.remote_ip == examineeJson.target.request.remote_ip]
+        print('[DBUG] targetList: ' + targetList[0].request.remote_ip)
+        return targetList[0]
+
+    def get_invigilator_json(self):
+        print('[DBUG] ENTER get_invigilator_json')
+        print(clients)
+        invJson = [c for c in clients if c.request.remote_ip == self.request.remote_ip][0]
+        print(invJson)
+        print('[DBUG] invJson: ' + invJson.request.remote_ip)
+        return invJson
+
         
 
 ##################################################
@@ -208,6 +257,7 @@ def profile(self, content):
     send_msg(self, reContent)
     check_exam(self, courseList)
 
+# BUG
 def booking(self, content):
     tsList = [{"start_time": item.start_time}
               for item in ExamTimeslot.objects.filter(course__code=content["code"])]
@@ -216,12 +266,14 @@ def booking(self, content):
     for ts in tsList:
         tsd = datetime.strptime(ts["start_time"], fmt)
         timeToExam = tsd - datetime.now()
+        remove = False
         if(timeToExam < timedelta(days=3)):
-            tsList.remove(ts)
+            remove = True
         for time in timeList:
             delta = tsd - time
             if(timedelta(hours=-1) < delta < timedelta(hours=1)):
-                tsList.remove(ts)
+                remove = True
+        if(remove): tsList.remove(ts)
     name = Course.objects.get(code=content["code"]).name
     reContent = {"event": "booking",
                  "endpoint": "Server",
@@ -265,8 +317,10 @@ def exam_question(self, content):
                      "question_set": qList
                  }
              }
-    # inv = [c for c in clients if c.account == exam.invigilator.account.username][0]
-    # self.target = inv.request.remote_ip
+    inv = [c for c in clients if c.account == exam.invigilator.account.username][0]
+    print('[DBUG] inv ip: ' + inv.request.remote_ip)
+    self.target = inv
+    print('[DBUG] target ip: ' + self.target.request.remote_ip)
     send_msg(self, reContent)
     
 def exam_question_answer(self, content):
@@ -308,43 +362,56 @@ def exam_chat(self, content):
     # send_msg(self, reContent)
 
 def profile_invigilator(self, content):
-    courseList = [{"code": e.enroll.course.code,
-                   "name": e.enroll.course.name,
-                   "status": "waiting",
-                   "start_time": e.timeslot.start_time}
-                  for e in Exam.objects.filter(invigilator__account__username=self.account)]
-    for course in courseList:
-        timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
+    examListRaw = [{"code": e.enroll.course.code,
+                 "name": e.enroll.course.name,
+                 "status": "waiting",
+                 "start_time": e.timeslot.start_time}
+                for e in Exam.objects.filter(invigilator__account__username=self.account)]
+    examList = []
+    for item in examListRaw:
+        if item not in examList:
+            examList.append(item)
+    for exam in examList:
+        timeToExam = datetime.strptime(exam["start_time"], fmt) - datetime.now()
         if(timeToExam < timedelta(minutes=15)):
-            course["status"] = "invigilate"
+            exam["status"] = "invigilate"
         if(timeToExam < timedelta(minutes=-15)):
-            course["status"] = "finished"
+            exam["status"] = "finished"
     reContent = {"event": "profile_invigilator",
                  "endpoint": "Server",
                  "content": {   
-                     "profile": {"courses": courseList}}}
+                     "profile": {"exams": examList}}}
     send_msg(self, reContent)
-    check_invigilate(self, courseList)
+    check_invigilate(self, examList)
 
 @gen.coroutine
-def check_invigilate(self, courseList):
+def check_invigilate(self, examList):
     print('[INFO] -----------------------------------------------------------------------')
     print('[EVET] check_invigilate EVOKED')
     while(self.inProfileView):
-        for course in courseList:
-            timeToExam = datetime.strptime(course["start_time"], fmt) - datetime.now()
-            if(timeToExam < timedelta(minutes=15) and course["status"] == "waiting"):
-                course["status"] = "invigilate"
+        for exam in examList:
+            timeToExam = datetime.strptime(exam["start_time"], fmt) - datetime.now()
+            if(timeToExam < timedelta(minutes=15) and exam["status"] == "waiting"):
+                exam["status"] = "invigilate"
                 reContent = {"event": "enable_invigilation",
                              "endpoint": "Server",
                              "content": {
-                                 "code": course["code"]
+                                 "code": exam["code"],
+                                 "start_time": exam["start_time"]
                              }
                          }
                 send_msg(self, reContent)
         yield gen.Task(IOLoop.instance().add_timeout, time.time() + 3)
     print('[EVET] check_invigilate FINISHED')
     print('[INFO] -----------------------------------------------------------------------')
+
+def invigilate(self, content):
+    self.inExamView = True
+    studentList = [e.enroll.student.account.username
+                   for e in Exam.objects.filter(invigilator__account__username=self.account,
+                                                enroll__course__code=content["code"],
+                                                timeslot__start_time=content["start_time"])]
+    self.examinees = studentList
 
 def logout(self, content):
     reContent = {"event": "logout",
@@ -354,12 +421,12 @@ def logout(self, content):
                  }
              }
     send_msg(self, reContent)
-    list_remove(clients, self.account)
-    list_remove(p2pclients, self.account)
+    list_remove(clients, self.request.remote_ip)
+    list_remove(p2pclients, self.request.remote_ip)
 
-def list_remove(clients, account):
+def list_remove(clients, ip):
     for c in clients:
-        if(c.account == account):
+        if(c.request.remote_ip == ip):
             clients.remove(c)
 
 ##################################################
@@ -367,14 +434,11 @@ def list_remove(clients, account):
 ##################################################
 
 JSONApp = web.Application([(r'/', JSONHandler),])
-VideoApp = web.Application([(r'/', P2PHandler),])
-AudioApp = web.Application([(r'/', P2PHandler),])
-ScreenApp = web.Application([(r'/', P2PHandler),])
+P2PApp = web.Application([(r'/', P2PHandler),])
 
 if __name__ == '__main__':    
     HTTPServer(JSONApp).listen(8087)
-    HTTPServer(VideoApp).listen(8080)
-    HTTPServer(AudioApp).listen(8081)
-    HTTPServer(ScreenApp).listen(8082)
+    HTTPServer(P2PApp).listen(8080)
     IOLoop.instance().add_callback(check_exam)
+    IOLoop.instance().add_callback(check_invigilate)
     IOLoop.instance().start()
