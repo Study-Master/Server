@@ -23,7 +23,8 @@ class JSONHandler(websocket.WebSocketHandler):
         self.account = ""
         self.endpoint = ""
         self.target = None
-        self.inProfileView = False        
+        self.inProfileView = False
+        self.current_exam_pk = None
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] NEW CONNECTION')
         self.show_client_info()
@@ -41,6 +42,7 @@ class JSONHandler(websocket.WebSocketHandler):
         if(self.endpoint == ""): self.endpoint = msg['endpoint']
         if(self.endpoint == "Invigilator"):
             self.inExamView = False
+            self.examineeList = []
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] ENTER ' + msg['event'] + ' VIEW')
@@ -62,7 +64,17 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[INFO] Account: ' + self.account)
         print('[INFO] Endpoint: ' + self.endpoint)
 
-class P2PHandler(websocket.WebSocketHandler):
+    def get_video_handler(self):
+        return [c for c in videoclients
+                if c.request.remote_ip == self.request.remote_ip
+                and c.endpoint == "Examinee"][0]
+        
+    def get_screen_handler(self):
+        return [c for c in screenclients
+                if c.request.remote_ip == self.request.remote_ip
+                and c.endpoint == "Examinee"][0]
+
+class ForwardHandler(websocket.WebSocketHandler):
     def open(self):
         self.content_type = ""
         self.setup()
@@ -81,6 +93,7 @@ class P2PHandler(websocket.WebSocketHandler):
                          "endpoint": "Server",
                          "content": {
                              "name": self.get_examinee_json().account,
+                             "exam_pk": self.get_examinee_json().current_exam_pk,
                              "type": self.content_type
                          }
                      }
@@ -89,7 +102,7 @@ class P2PHandler(websocket.WebSocketHandler):
         else:
             self.endpoint = "Invigilator"
         print('[INFO] -----------------------------------------------------------------------')
-        print('[EVNT] P2P SOCKET CONNECTED')
+        print('[EVNT] Forward SOCKET CONNECTED')
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] endpoint: ' + self.endpoint)
         if(self.target):
@@ -137,12 +150,12 @@ class P2PHandler(websocket.WebSocketHandler):
         print('[DBUG] invJson: ' + invJson.request.remote_ip)
         return invJson
 
-class VideoHandler(P2PHandler):
+class VideoHandler(ForwardHandler):
     def open(self):
         self.content_type = "video"
         self.setup()
 
-class ScreenHandler(P2PHandler):
+class ScreenHandler(ForwardHandler):
     def open(self):
         self.content_type = "screen"
         self.setup()
@@ -319,6 +332,7 @@ def exam_question(self, content):
     exam = Exam.objects.get(enroll=Enroll.objects.get(
         student=Student.objects.get(account=Account.objects.get(username=self.account)),
         course=Course.objects.get(code=content["code"])))
+    self.current_exam_pk = exam.pk
     reContent = {"event": "exam_question",
                  "endpoint": "Server",
                  "content": {
@@ -341,9 +355,12 @@ def exam_question_answer(self, content):
         answer.save()
     reContent = {"event": "submission_successful",
                  "endpoint": "Server",
-                 "content": None
+                 "content": self.account
              }
     send_msg(self, reContent)
+    send_msg(self.target, reContent)
+    self.get_video_handler().close()
+    self.get_screen_handler().close()
         
 def cancel(self, content):
     exam = Exam.objects.get(enroll=Enroll.objects.get(
@@ -423,11 +440,36 @@ def check_invigilate(self, examList):
 
 def invigilate(self, content):
     self.inExamView = True
-    studentList = [e.enroll.student.account.username
-                   for e in Exam.objects.filter(invigilator__account__username=self.account,
-                                                enroll__course__code=content["code"],
-                                                timeslot__start_time=content["start_time"])]
-    self.examinees = studentList
+    # accountList = [e.enroll.student.account.username
+    #                for e in Exam.objects.filter(invigilator__account__username=self.account,
+    #                                             enroll__course__code=content["code"],
+    #                                             timeslot__start_time=content["start_time"])]
+    # examineeList = []
+    # for account in accountList:
+    #     examinee = [c for c in clients
+    #                 if c.account == account
+    #                 and c.endpoint == "Examinee"][0]
+    #     examineeList.append(examinee)
+    # self.examineeList = examineeList
+    
+    # reContent = {"event": "start_invigilation",
+    #              "endpoint": "Server",
+    #              "content": {
+    #                  "exam_pk": "1"
+    #              }
+    #          }
+    
+    # send_msg(self, reContent)
+
+def auth_successful(self, content):
+    target = [c for c in clients
+              if c.account == content['name']
+              and c.endpoint == "Examinee"][0]
+    reContent = {"event": "auth_successful",
+                 "endpoint": "Server",
+                 "content": None
+             }
+    send_msg(target, reContent)
 
 def logout(self, content):
     reContent = {"event": "logout",

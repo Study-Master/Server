@@ -28,3 +28,6 @@ class JSONTest(unittest.TestCase):
     def conduct_test(self):
         websocket_connect(self.url, callback=self.write_read_msg)
         IOLoop.instance().start()
+
+    def send_input(self):
+        websocket_connect(self.url, callback=self.write_msg_only)

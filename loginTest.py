@@ -31,7 +31,7 @@ class LoginTest(JSONTest):
                                 'status': 'failed',
                                 'code': '0',
                                 'reason': "Your account is already logged in!"}}
-        websocket_connect(self.url, callback=self.write_msg_only)
+        self.send_input()
         self.conduct_test()
 
     def test_login_failure_wronginfo(self):
