@@ -20,15 +20,19 @@ class JSONTest(unittest.TestCase):
                            "endpoint": "Examinee",
                            "content": None
                        }
+        self.connection = None
+
+    def connect(self, callback):
+        websocket_connect(self.url, callback=callback)
         
-    def read_message(self, future):
+    def read_and_validate_msg(self, future):
         self.assertEqual(json.loads(future.result()), self.exptOutput)
         IOLoop.instance().stop()
         
     def write_read_msg(self, future):
         self.connection = future.result()
         self.connection.write_message(json.dumps(self.exptInput))
-        self.connection.read_message(callback=self.read_message)
+        self.connection.read_message(callback=self.read_and_validate_msg)
 
     def write_msg_only(self, future, msg):
         self.connection = future.result()
@@ -36,11 +40,11 @@ class JSONTest(unittest.TestCase):
         IOLoop.instance().stop()
 
     def conduct_test(self):
-        websocket_connect(self.url, callback=self.write_read_msg)
+        self.connect(callback=self.write_read_msg)
         IOLoop.instance().start()
 
     def login(self):
-        websocket_connect(self.url, callback=partial(self.write_msg_only, msg=self.loginInfo))
+        self.connect(callback=partial(self.write_msg_only, msg=self.loginInfo))
 
     def logout(self):
-        websocket_connect(self.url, callback=partial(self.write_msg_only, msg=self.logoutInfo))
+        self.connect(callback=partial(self.write_msg_only, msg=self.logoutInfo))

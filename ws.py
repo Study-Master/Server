@@ -10,7 +10,7 @@ import time
 import json
 
 ##################################################
-#  WEBSOCKET APPS
+#  WEBSOCKET HANDLER
 ##################################################
 
 clients = []
@@ -73,6 +73,19 @@ class JSONHandler(websocket.WebSocketHandler):
         return [c for c in screenclients
                 if c.request.remote_ip == self.request.remote_ip
                 and c.endpoint == "Examinee"][0]
+
+    def set_target_to_examinee_by_account(self, account):
+        self.target = [c for c in clients
+                       if c.account == account
+                       and c.endpoint == "Examinee"][0]
+
+    def set_target_to_invigilator_by_account(self, account):
+        try:
+            self.target = [c for c in clients
+                           if c.account == account
+                           and c.endpoint == "Invigilator"][0]
+        except IndexError:
+            print('[ERRO] Invigilator not logged in!!!')
 
 class ForwardHandler(websocket.WebSocketHandler):
     def open(self):
@@ -143,11 +156,10 @@ class ForwardHandler(websocket.WebSocketHandler):
     def get_invigilator_json(self):
         examineeJson = self.get_examinee_json()
         print('[DBUG] ENTER get_invigilator_json')
-        print(clients)
         invJson = [c for c in clients
                    if c.request.remote_ip == examineeJson.target.request.remote_ip][0]
         print(invJson)
-        print('[DBUG] invJson: ' + invJson.request.remote_ip)
+        print('[DBUG] invJson ip: ' + invJson.request.remote_ip)
         return invJson
 
 class VideoHandler(ForwardHandler):
@@ -162,10 +174,15 @@ class ScreenHandler(ForwardHandler):
 
     
 ##################################################
-#  VIEWS
+#  OTHER FUNCTIONS
 ##################################################
 
 fmt = '%Y/%m/%d %H:%M:%S'
+
+def list_remove(clients, ip):
+    for c in clients:
+        if(c.request.remote_ip == ip):
+            clients.remove(c)
 
 def send_msg(self, reContent):
     print('[INFO] -----------------------------------------------------------------------')
@@ -174,6 +191,10 @@ def send_msg(self, reContent):
     print('[JSON] ' + msg)
     self.write_message(msg)
     print('[INFO] -----------------------------------------------------------------------')
+    
+##################################################
+#  EVENT HANDLER
+##################################################
 
 def login(self, content):
     try:
@@ -218,12 +239,14 @@ def check_exam(self, courseList):
                 if(timeToExam < timedelta(days=3) and course["status"] == "booked"):
                     event = "cancel_disabled"
                     course["status"] = "confirmed"
-                if(timeToExam < timedelta(minutes=15) and course["status"] == "confirmed"):
+                if(timeToExam < timedelta(minutes=15, seconds=30)
+                   and course["status"] == "confirmed"):
                     event = "exam_enabled"
                     course["status"] = "exam"
                 if(timeToExam < timedelta(minutes=-15) and course["status"] == "exam"):
                     event = "exam_disabled"
                     course["status"] = "finished"
+                    break
                 if(event):
                     reContent = {'event': event,
                                  'endpoint': 'Server',
@@ -260,6 +283,12 @@ def profile(self, content):
                 course["status"] = "exam"
             if(timeToExam < timedelta(minutes=-15)):
                 course["status"] = "finished"
+            try:
+                answer = Answer.objects.filter(exam=exam)
+            except ObjectDoesNotExist:
+                answer = None
+            if(answer):
+                course["status"] = "finished"
         else:
             tsList = [datetime.strptime(item.start_time, fmt)
                       for item in ExamTimeslot.objects.filter(course__code=course["code"])]
@@ -280,7 +309,6 @@ def profile(self, content):
     send_msg(self, reContent)
     check_exam(self, courseList)
 
-# BUG
 def booking(self, content):
     tsList = [{"start_time": item.start_time}
               for item in ExamTimeslot.objects.filter(course__code=content["code"])]
@@ -341,9 +369,7 @@ def exam_question(self, content):
                      "question_set": qList
                  }
              }
-    inv = [c for c in clients if c.account == exam.invigilator.account.username][0]
-    print('[DBUG] inv ip: ' + inv.request.remote_ip)
-    self.target = inv
+    self.set_target_to_invigilator_by_account(exam.invigilator.account.username)
     print('[DBUG] target ip: ' + self.target.request.remote_ip)
     send_msg(self, reContent)
     
@@ -355,7 +381,9 @@ def exam_question_answer(self, content):
         answer.save()
     reContent = {"event": "submission_successful",
                  "endpoint": "Server",
-                 "content": self.account
+                 "content": {
+                     "name": self.account
+                 }
              }
     send_msg(self, reContent)
     send_msg(self.target, reContent)
@@ -385,14 +413,10 @@ def exam_chat(self, content):
     reContent = {"event": "exam_chat",
                  "endpoint": self.endpoint,
                  "content": content}
-    target = None
-    if(self.endpoint == "Examinee"):
-        target = self.target            
-    else:
-        target = [c for c in clients
-                  if c.account == ex.enroll.student.account.username
-                  and c.endpoint == "Examinee"][0]
-    send_msg(target, reContent)
+    if(self.endpoint == "Invigilator"):
+        account = ex.enroll.student.account.username
+        self.set_target_to_examinee_by_account(account)
+    send_msg(self.target, reContent)
 
 def profile_invigilator(self, content):
     examListRaw = [{"code": e.enroll.course.code,
@@ -440,36 +464,14 @@ def check_invigilate(self, examList):
 
 def invigilate(self, content):
     self.inExamView = True
-    # accountList = [e.enroll.student.account.username
-    #                for e in Exam.objects.filter(invigilator__account__username=self.account,
-    #                                             enroll__course__code=content["code"],
-    #                                             timeslot__start_time=content["start_time"])]
-    # examineeList = []
-    # for account in accountList:
-    #     examinee = [c for c in clients
-    #                 if c.account == account
-    #                 and c.endpoint == "Examinee"][0]
-    #     examineeList.append(examinee)
-    # self.examineeList = examineeList
-    
-    # reContent = {"event": "start_invigilation",
-    #              "endpoint": "Server",
-    #              "content": {
-    #                  "exam_pk": "1"
-    #              }
-    #          }
-    
-    # send_msg(self, reContent)
 
 def auth_successful(self, content):
-    target = [c for c in clients
-              if c.account == content['name']
-              and c.endpoint == "Examinee"][0]
+    self.set_target_to_examinee_by_account(content["name"])
     reContent = {"event": "auth_successful",
                  "endpoint": "Server",
                  "content": None
              }
-    send_msg(target, reContent)
+    send_msg(self.target, reContent)
 
 def logout(self, content):
     reContent = {"event": "logout",
@@ -483,11 +485,22 @@ def logout(self, content):
     list_remove(videoclients, self.request.remote_ip)
     list_remove(screenclients, self.request.remote_ip)
 
-
-def list_remove(clients, ip):
-    for c in clients:
-        if(c.request.remote_ip == ip):
-            clients.remove(c)
+def terminate(self, content):
+    exam = Exam.objects.get(pk=content["exam_pk"])
+    answer = Answer(exam=Exam.objects.get(pk=content["exam_pk"]),
+                    question=ExamQuestion.objects.get(pk=1),
+                    answer="terminated")
+    answer.save()
+    self.set_target_to_examinee_by_account(content["name"])
+    reContent = {"event": "terminate",
+                 "endpoint": "Server",
+                 "content": {
+                     "code": exam.enroll.course.code,
+                     "exam_pk": content["exam_pk"],
+                     "reason": content["reason"]
+                 }
+             }
+    send_msg(self.target, reContent)
 
 ##################################################
 #  MAIN
