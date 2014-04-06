@@ -10,18 +10,22 @@ class LoginTest(JSONTest):
 
     def setUp(self):
         super().setUp()
-        self.exptOutput = {'event': 'login',
-                           'endpoint': 'Server',
-                           'content': {
-                               'status': 'success'}}
         self.exptInput = {"event": "login",
                           "endpoint": "Examinee",
-                          "content": {
-                              "account": "d",
-                              "password": "c4ca4238a0b923820dcc509a6f75849b"
-                          }}
+                          "content": {"account": "test",
+                                      "password": "c4ca4238a0b923820dcc509a6f75849b"}
+                         }
+
+    def tearDown(self):
+        self.exptInput['content']['account'] = "test"
+        self.logout()
+
 
     def test_login_success(self):
+        self.exptOutput = {'event': 'login',
+                           'endpoint': 'Server',
+                           'content': {'status': 'success'}
+                       }
         self.conduct_test()
 
     def test_login_failure_alreadyloggedin(self):
@@ -31,7 +35,7 @@ class LoginTest(JSONTest):
                                 'status': 'failed',
                                 'code': '0',
                                 'reason': "Your account is already logged in!"}}
-        self.send_input()
+        self.login()
         self.conduct_test()
 
     def test_login_failure_wronginfo(self):
@@ -45,4 +49,4 @@ class LoginTest(JSONTest):
         self.conduct_test()
 
 if __name__ == '__main__':
-    unittest.main()
+   unittest.main()
