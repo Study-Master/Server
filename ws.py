@@ -16,6 +16,7 @@ import json
 clients = []
 videoclients = []
 screenclients = []
+audioclients = []
 
 class JSONHandler(websocket.WebSocketHandler):
     def open(self, *args):
@@ -29,6 +30,8 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[EVNT] NEW CONNECTION')
         self.show_client_info()
         print('[INFO] -----------------------------------------------------------------------')
+        print('[DBUG] client list: ' +
+              str([(c.endpoint, c.request.remote_ip) for c in clients]))
     
     def on_message(self, message):
         print('[INFO] -----------------------------------------------------------------------')
@@ -56,6 +59,8 @@ class JSONHandler(websocket.WebSocketHandler):
         print('[INFO] -----------------------------------------------------------------------')
         list_remove(clients, self.request.remote_ip)
         self.close()
+        print('[DBUG] client list: ' +
+              str([(c.endpoint, c.request.remote_ip) for c in clients]))
 
     def show_client_info(self):
         print('[INFO]')
@@ -101,17 +106,18 @@ class ForwardHandler(websocket.WebSocketHandler):
         if(self.is_examinee()):
             self.endpoint = "Examinee"
             self.json_target = self.get_invigilator_json()
-            self.target = self.get_invigilator_p2p()
-            reContent = {"event": "examinee_come_in",
-                         "endpoint": "Server",
-                         "content": {
-                             "name": self.get_examinee_json().account,
-                             "exam_pk": self.get_examinee_json().current_exam_pk,
-                             "type": self.content_type
-                         }
-                     }
-            self.json_target.write_message(json.dumps(reContent))
-            print('[EVNT] examinee_come_in JSON SEND')
+            self.target = self.get_invigilator_forward()
+            self.send_examinee_info()
+            # reContent = {"event": "examinee_come_in",
+            #              "endpoint": "Server",
+            #              "content": {
+            #                  "name": self.get_examinee_json().account,
+            #                  "exam_pk": self.get_examinee_json().current_exam_pk,
+            #                  "type": self.content_type
+            #              }
+            #          }
+            # self.json_target.write_message(json.dumps(reContent))
+            # print('[EVNT] examinee_come_in JSON SEND')
         else:
             self.endpoint = "Invigilator"
         print('[INFO] -----------------------------------------------------------------------')
@@ -119,13 +125,39 @@ class ForwardHandler(websocket.WebSocketHandler):
         print('[INFO] IP: ' + self.request.remote_ip)
         print('[INFO] endpoint: ' + self.endpoint)
         if(self.target):
-            print('[INFO] p2p target ip: ' + self.target.request.remote_ip)
+            print('[INFO] forward target ip: ' + self.target.request.remote_ip)
         print('[INFO] -----------------------------------------------------------------------')
-        print('[DBUG] client list: ' + str([c.endpoint for c in clients]))
+        print('[DBUG] client list: ' +
+              str([(c.endpoint, c.request.remote_ip) for c in clients]))
+
+    def send_examinee_info(self):
+        reContent = {"event": "examinee_come_in",
+                     "endpoint": "Server",
+                     "content": {
+                         "name": self.get_examinee_json().account,
+                         "exam_pk": self.get_examinee_json().current_exam_pk,
+                         "type": self.content_type
+                     }
+                 }
+        self.json_target.write_message(json.dumps(reContent))
+        print('[EVNT] examinee_come_in JSON SEND')
     
     def on_message(self, message):
         if(self.endpoint == "Examinee"):
             self.target.write_message(message, binary=True)
+        else:
+            self.forward_to_examinee(message)
+
+    def forward_to_examinee(self, message):
+        pass
+        
+    def get_examinee_forward_by_account(self, account):
+        JSONtarget = [c for c in clients
+                      if c.account == account
+                      and c.endpoint == "Examinee"][0]
+        return [c for c in globals()[self.content_type+'clients']
+                if c.request.remote_ip == JSONtarget.request.remote_ip
+                and c.endpoint == "Examinee"][0]
 
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
@@ -135,6 +167,8 @@ class ForwardHandler(websocket.WebSocketHandler):
         print('[INFO] -----------------------------------------------------------------------')
         list_remove(globals()[self.content_type+'clients'], self.request.remote_ip)
         self.close()
+        print('[DBUG] client list: ' +
+              str([(c.endpoint, c.request.remote_ip) for c in clients]))
 
     def is_examinee(self):
         return self.request.remote_ip in [c.request.remote_ip for c in clients
@@ -145,7 +179,7 @@ class ForwardHandler(websocket.WebSocketHandler):
                 if c.request.remote_ip == self.request.remote_ip
                 and c.endpoint == "Examinee"][0]
     
-    def get_invigilator_p2p(self):
+    def get_invigilator_forward(self):
         examineeJson = self.get_examinee_json()
         print('[DBUG] examineeJson: ' + examineeJson.target.request.remote_ip)
         targetList = [pc for pc in globals()[self.content_type+'clients']
@@ -171,6 +205,21 @@ class ScreenHandler(ForwardHandler):
     def open(self):
         self.content_type = "screen"
         self.setup()
+
+    def send_examinee_info(self):
+        pass
+
+class AudioHandler(ForwardHandler):
+    def open(self):
+        self.content_type = "audio"
+        self.setup()
+
+    def send_examinee_info(self):
+        pass
+
+    def forward_to_examinee(self, message):
+        self.target = self.get_examinee_forward_by_account(message[:50].decode('utf-8'))
+        self.target.write_message(message, binary=True)
 
     
 ##################################################
@@ -509,11 +558,13 @@ def terminate(self, content):
 JSONApp = web.Application([(r'/', JSONHandler),])
 VideoApp = web.Application([(r'/', VideoHandler),])
 ScreenApp = web.Application([(r'/', ScreenHandler),])
+AudioApp = web.Application([(r'/', AudioHandler),])
 
 if __name__ == '__main__':    
     HTTPServer(JSONApp).listen(8087)
     HTTPServer(VideoApp).listen(8080)
     HTTPServer(ScreenApp).listen(8081)
+    HTTPServer(AudioApp).listen(8082)
     IOLoop.instance().add_callback(check_exam)
     IOLoop.instance().add_callback(check_invigilate)
     IOLoop.instance().start()
