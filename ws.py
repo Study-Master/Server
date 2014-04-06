@@ -215,7 +215,10 @@ class AudioHandler(ForwardHandler):
         pass
 
     def forward_to_examinee(self, message):
-        self.target = self.get_examinee_forward_by_account(message[:50].decode('utf-8'))
+        account = message[:50].decode('utf-8').split('\x00', 1)[0]
+        print('[DBUG] DECODED ACCOUNT NAME ==> '+ account)
+        print('[DBUG] LENGTH ==> '+ str(len(account)))
+        self.target = self.get_examinee_forward_by_account(account)
         self.target.write_message(message, binary=True)
         print('[DBUG] '+ self.content_type + 'DATA SEND')
 
