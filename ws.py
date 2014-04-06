@@ -19,6 +19,7 @@ screenclients = []
 audioclients = []
 
 class JSONHandler(websocket.WebSocketHandler):
+    
     def open(self, *args):
         clients.append(self)
         self.account = ""
@@ -93,6 +94,7 @@ class JSONHandler(websocket.WebSocketHandler):
             print('[ERRO] Invigilator not logged in!!!')
 
 class ForwardHandler(websocket.WebSocketHandler):
+
     def open(self):
         self.content_type = ""
         self.setup()
@@ -108,27 +110,11 @@ class ForwardHandler(websocket.WebSocketHandler):
             self.json_target = self.get_invigilator_json()
             self.target = self.get_invigilator_forward()
             self.send_examinee_info()
-            # reContent = {"event": "examinee_come_in",
-            #              "endpoint": "Server",
-            #              "content": {
-            #                  "name": self.get_examinee_json().account,
-            #                  "exam_pk": self.get_examinee_json().current_exam_pk,
-            #                  "type": self.content_type
-            #              }
-            #          }
-            # self.json_target.write_message(json.dumps(reContent))
-            # print('[EVNT] examinee_come_in JSON SEND')
         else:
             self.endpoint = "Invigilator"
         print('[INFO] -----------------------------------------------------------------------')
-        print('[EVNT] Forward SOCKET CONNECTED')
-        print('[INFO] IP: ' + self.request.remote_ip)
-        print('[INFO] endpoint: ' + self.endpoint)
-        if(self.target):
-            print('[INFO] forward target ip: ' + self.target.request.remote_ip)
-        print('[INFO] -----------------------------------------------------------------------')
-        print('[DBUG] client list: ' +
-              str([(c.endpoint, c.request.remote_ip) for c in clients]))
+        print('[EVNT] FORWARD SOCKET CONNECTED')
+        self.show_debug_info()
 
     def send_examinee_info(self):
         reContent = {"event": "examinee_come_in",
@@ -162,8 +148,7 @@ class ForwardHandler(websocket.WebSocketHandler):
     def on_close(self):
         print('[INFO] -----------------------------------------------------------------------')
         print('[EVNT] CONNECTION CLOSED')
-        print('[INFO] endpoint: ' + self.endpoint)
-        print('[INFO] IP: ' + self.request.remote_ip)
+        self.show_debug_info()
         print('[INFO] -----------------------------------------------------------------------')
         list_remove(globals()[self.content_type+'clients'], self.request.remote_ip)
         self.close()
@@ -172,7 +157,7 @@ class ForwardHandler(websocket.WebSocketHandler):
 
     def is_examinee(self):
         return self.request.remote_ip in [c.request.remote_ip for c in clients
-                                      if c.endpoint == "Examinee"]
+                                          if c.endpoint == "Examinee"]
 
     def get_examinee_json(self):
         return [c for c in clients
@@ -185,6 +170,7 @@ class ForwardHandler(websocket.WebSocketHandler):
         targetList = [pc for pc in globals()[self.content_type+'clients']
                       if pc.request.remote_ip == examineeJson.target.request.remote_ip]
         print('[DBUG] targetList: ' + targetList[0].request.remote_ip)
+        print(targetList[0])
         return targetList[0]
 
     def get_invigilator_json(self):
@@ -192,9 +178,20 @@ class ForwardHandler(websocket.WebSocketHandler):
         print('[DBUG] ENTER get_invigilator_json')
         invJson = [c for c in clients
                    if c.request.remote_ip == examineeJson.target.request.remote_ip][0]
-        print(invJson)
         print('[DBUG] invJson ip: ' + invJson.request.remote_ip)
         return invJson
+
+    def show_debug_info(self):
+        print('[INFO] IP: ' + self.request.remote_ip)
+        print('[INFO] endpoint: ' + self.endpoint)
+        print('[INFO] type: ' + self.content_type)
+        if(self.target):
+            print('[INFO] forward target ip: ' + self.target.request.remote_ip)
+        print('[INFO] -----------------------------------------------------------------------')
+        print('[DBUG] forward client list: ' +
+              str([(c.endpoint, c.request.remote_ip)
+                   for c in globals()[self.content_type+'clients']]))
+        
 
 class VideoHandler(ForwardHandler):
     def open(self):
@@ -220,6 +217,7 @@ class AudioHandler(ForwardHandler):
     def forward_to_examinee(self, message):
         self.target = self.get_examinee_forward_by_account(message[:50].decode('utf-8'))
         self.target.write_message(message, binary=True)
+        print('[DBUG] '+ self.content_type + 'DATA SEND')
 
     
 ##################################################
@@ -386,13 +384,18 @@ def booking(self, content):
     send_msg(self, reContent)
 
 def booked(self, content):
+    inv = None
+    if(self.account == "test"):
+        inv = Invigilator.objects.get(pk=3)
+    else:
+        inv = Invigilator.objects.get(pk=2)
     exam = Exam(enroll=Enroll.objects.get(
         student=Student.objects.get(
             account=Account.objects.get(username=self.account)),
         course=Course.objects.get(code=content["code"])),
         timeslot=ExamTimeslot.objects.get(start_time=content["start_time"],
                                           course__code=content["code"]),
-        invigilator=Invigilator.objects.all()[0])
+                invigilator=inv)
     print('[INFO] EXAM BOOKED')
     exam.save()
     reContent = {"event": "booked",

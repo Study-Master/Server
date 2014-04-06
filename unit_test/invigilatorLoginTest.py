@@ -10,6 +10,17 @@ class invigilatorLoginTest(JSONTest):
 
     def setUp(self):
         super().setUp()
+
+        self.loginInfo = {"event": "login",
+                          "endpoint": "Invigilator",
+                          "content": {"account": "invtest",
+                                      "password": "c4ca4238a0b923820dcc509a6f75849b"}
+                         }
+        self.logoutInfo = {"event": "logout",
+                           "endpoint": "Invigilator",
+                           "content": None
+                       }
+
         self.exptInput = {"event": "login",
                           "endpoint": "Invigilator",
                           "content": {"account": "invtest",

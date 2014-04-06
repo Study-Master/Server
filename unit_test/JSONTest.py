@@ -11,15 +11,8 @@ class JSONTest(unittest.TestCase):
         self.exptInput = None
         self.exptOutput = None
         self.connection = None
-        self.loginInfo = {"event": "login",
-                          "endpoint": "Examinee",
-                          "content": {"account": "test",
-                                      "password": "c4ca4238a0b923820dcc509a6f75849b"}
-                         }
-        self.logoutInfo = {"event": "logout",
-                           "endpoint": "Examinee",
-                           "content": None
-                       }
+        self.loginInfo = None
+        self.logoutInfo = None
         self.msg = None
         self.connection = None
   
@@ -49,5 +42,40 @@ class JSONTest(unittest.TestCase):
 
     def login(self):
         self.connect(callback=partial(self.write_msg_only, msg=self.loginInfo))
+        
     def logout(self):
         self.connect(callback=partial(self.write_msg_only, msg=self.logoutInfo))
+
+    def examinee_login(self):
+        self.loginInfo = {"event": "login",
+                          "endpoint": "Examinee",
+                          "content": {"account": "test",
+                                      "password": "c4ca4238a0b923820dcc509a6f75849b"}
+                      }
+        self.login()
+        self.loginInfo = None
+
+    def examinee_logout(self):
+        self.logoutInfo = {"event": "logout",
+                           "endpoint": "Examinee",
+                           "content": None
+                       }
+        self.logout()
+        self.logoutInfo = None
+
+    def invigilator_login(self):
+        self.loginInfo = {"event": "login",
+                          "endpoint": "Invigilator",
+                          "content": {"account": "invtest",
+                                      "password": "c4ca4238a0b923820dcc509a6f75849b"}
+                         }
+        self.login()
+        self.loginInfo = None
+        
+    def invigilator_logout(self):
+        self.logoutInfo = {"event": "logout",
+                           "endpoint": "Invigilator",
+                           "content": None
+                       }
+        self.logout()
+        self.logoutInfo = None
