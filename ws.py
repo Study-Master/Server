@@ -247,6 +247,7 @@ def send_msg(self, reContent):
 ##################################################
 
 def login(self, content):
+    fail = False
     try:
         if([client for client in clients
             if client.account == content['account']] != []):
@@ -270,7 +271,9 @@ def login(self, content):
                          'status': 'failed',
                          'code': '0',
                          'reason': reason}}
+        fail = True
     send_msg(self, reContent)
+    if(fail): self.close()
 
 @gen.coroutine
 def check_exam(self, courseList):
@@ -425,7 +428,6 @@ def exam_question(self, content):
                  }
              }
     self.set_target_to_invigilator_by_account(exam.invigilator.account.username)
-    print('[DBUG] target ip: ' + self.target.request.remote_ip)
     send_msg(self, reContent)
     
 def exam_question_answer(self, content):
